@@ -7,3 +7,5 @@
 - Linux BlueZ — 별도 설치된 시스템 소프트웨어입니다. 이 저장소는 BlueZ 바이너리를 재배포하지 않습니다.
 
 저장소의 MIT 라이선스는 외부 구성 요소의 기존 권리를 대체하지 않습니다. 배포 시 실제 사용 버전의 라이선스도 확인해주세요.
+
+- 선택적 비상 인터넷 PC 도구: [tun2socks v2.7.0](https://github.com/xjasonlyu/tun2socks/releases/tag/v2.7.0), MIT. [라이선스](licenses/tun2socks.LICENSE)를 보존하며 공식 ZIP의 SHA-256을 설치기에 고정했습니다. ESP32 펌웨어에 해당 실행 파일을 포함하지 않습니다.

@@ -1,0 +1,29 @@
+{
+  "wireless_update_verified": true,
+  "firmware": "bc250-monitor-5.8.3",
+  "partition_before": "app0",
+  "partition_after": "app1",
+  "sha256": "c7f6cabefb4b6f7590b44d9d67276fc635057d4c15b66c59c56a07661b882741",
+  "saved_settings_preserved": true,
+  "keep_power_test": true,
+  "relay_resumed_after_restart": true,
+  "pc_boot_id_unchanged": true,
+  "physical_gpio_continuity_measured": false,
+  "python_tests_passed": 24,
+  "cpp_hci_and_network_tests_passed": true,
+  "js_usb_menu_test_passed": true,
+  "usb_features_after_ota": {
+    "bluetooth": false,
+    "monitoring": false,
+    "internet": false
+  },
+  "usb_api_dependency_checks": true,
+  "usb_api_header_auth_guard": true,
+  "sd_admin_menu_updated": true,
+  "remote_power_actions_blocked": true,
+  "usb_internet_live_tested": false,
+  "usb_connected_cold_boot_tested": false,
+  "pc_controller_installation": "installed; all USB feature switches left OFF for user testing",
+  "release_status": "experimental individual USB test controls",
+  "live_bluetooth_and_internet_tested": false
+}

@@ -9,7 +9,6 @@ import unittest
 import socket
 import struct
 import os
-import hmac,hashlib,uuid
 from urllib.request import Request, build_opener, ProxyHandler
 from urllib.error import HTTPError
 from http.server import ThreadingHTTPServer
@@ -54,23 +53,15 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(struct.unpack('!HHHH',frame[34:42]),(9093,9092,8+len(payload),0))
         self.assertEqual(frame[42:],payload)
 
-    def test_usb_final_packet_is_bound_to_boot_and_nonce(self):
+    def test_diagnostic_power_block_keeps_monitoring_and_never_executes(self):
         with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory);packet=agent.FinalShutdownPacket('test-token',root/'final-packet')
-            nonce=bytes(range(16));packet.prepare_usb('/dev/ttyUSB0',nonce)
-            target=root/'final-usb-packet';data=target.read_bytes()
-            self.assertEqual(len(data),154);self.assertEqual(target.stat().st_mode&0o777,0o600)
-            boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
-            self.assertEqual(data[40:76].decode(),boot)
-            self.assertEqual(data[78:82],b'\x01\xf3\xfc\x48')
-            payload=data[82:];self.assertEqual(payload[:8],b'BC250F2\0')
-            self.assertEqual(payload[8:24],uuid.UUID(boot).bytes);self.assertEqual(payload[24:40],nonce)
-            expected=hmac.new(b'test-token',f'bc250-usb-poweroff-v1|{boot}|{nonce.hex()}'.encode(),hashlib.sha256).digest()
-            self.assertEqual(payload[40:],expected)
-            before=target.stat().st_mtime_ns;packet.prepare_usb('/dev/ttyUSB0',nonce)
-            self.assertEqual(target.stat().st_mtime_ns,before)
-            packet.prepare_usb('/dev/ttyS0',nonce);packet.prepare_usb('/dev/ttyUSB0',bytes(16))
-            self.assertEqual(target.read_bytes(),data)
+            flag=Path(directory)/'block-power-actions';flag.write_text('diagnostic')
+            calls=[];controller=agent.Controller('test-token',runner=lambda *a,**k:calls.append(a),power_block_file=flag)
+            for action in ('shutdown','reboot'):
+                status,body=controller.request(action)
+                self.assertEqual(status,423);self.assertEqual(body['error'],'power_actions_temporarily_blocked')
+            self.assertEqual(calls,[]);self.assertIsNone(controller.pending)
+            self.assertEqual(controller.state()['state'],'running')
 
     def test_kernel_counters_missing_sensors_and_cpu_delta(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -107,7 +98,7 @@ class MonitoringTests(unittest.TestCase):
 
     def test_api_compatibility_authentication_and_power_guards(self):
         calls=[]
-        controller=agent.Controller('a'*64,runner=lambda argv,**kw:(calls.append(argv) or SimpleNamespace(returncode=0)),
+        controller=agent.Controller('a'*64,power_block_file=Path('/proc/bc250-test-no-block-file'),runner=lambda argv,**kw:(calls.append(argv) or SimpleNamespace(returncode=0)),
                     metrics=SimpleNamespace(collect=lambda:{'cpu_percent':30,'gpu_percent':None}))
         controller.state=lambda:{'device':'bc250','state':controller.pending or 'running',
                                  'uptime_seconds':123,'boot_id':'test-only'}

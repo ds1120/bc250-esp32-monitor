@@ -17,6 +17,7 @@ import ipaddress
 import re
 import shlex
 
+MONITOR_ENABLE_FILE=Path('/run/bc250-usb-features/monitor.enabled')
 OPCODE = 0xFCF0
 FORMAT = '<8sI16sI8fH'
 KEYS = ('cpu_percent','cpu_temp_c','gpu_percent','gpu_temp_c',
@@ -99,6 +100,9 @@ class UsbMonitorPublisher:
         self.info_at=0
 
     def tick(self):
+        if not MONITOR_ENABLE_FILE.exists():
+            if self.sock:self.sock.close();self.sock=None
+            return
         try:
             device = json.loads(self.config.read_text())['device']
             index = find_controller(device)
@@ -120,7 +124,6 @@ class UsbMonitorPublisher:
                 if len(reply)>=9 and reply[:2]==b'\x04\x0e' and reply[4:7]==b'\xf0\xfc\0':
                     interval=int.from_bytes(reply[7:9],'little')
                     if 1000<=interval<=5000:self.interval=interval/1000
-                    if len(reply)>=25 and hasattr(self.controller.final_packet,'prepare_usb'):self.controller.final_packet.prepare_usb(device,reply[9:25])
             if time.monotonic()-self.info_at>=30:
                 self.info_at=time.monotonic()
                 try:

@@ -32,9 +32,14 @@ class UsbMonitorTests(unittest.TestCase):
             config=Path(directory)/'config.json';config.write_text('{"device":"/dev/ttyUSB0"}')
             controller=Mock();controller.state.return_value={'state':'running','boot_id':'00112233-4455-6677-8899-aabbccddeeff','uptime_seconds':123};controller.metrics.collect.return_value={'cpu_percent':25.5}
             sock=Mock();sock.send.side_effect=lambda data:len(data);sock.recv.return_value=bytes([4,14,6,1,0xf0,0xfc,0,0xe8,3])
-            with patch.object(m,'read_host_info',return_value=None),patch.object(m,'find_controller',return_value=1),patch.object(m.socket,'socket',return_value=sock),patch.object(m.select,'select',return_value=([sock],[],[])):
+            with patch.object(m,'MONITOR_ENABLE_FILE',config),patch.object(m,'read_host_info',return_value=None),patch.object(m,'find_controller',return_value=1),patch.object(m.socket,'socket',return_value=sock),patch.object(m.select,'select',return_value=([sock],[],[])):
                 publisher=m.UsbMonitorPublisher(controller,config);publisher.tick();self.assertEqual(publisher.interval,1.0)
                 sock.bind.assert_called_once_with((1,0));self.assertEqual(sock.send.call_args.args[0][:4],bytes([1,0xf0,0xfc,66]))
+
+    def test_disabled_monitor_never_opens_hci(self):
+        with tempfile.TemporaryDirectory() as directory,patch.object(m.socket,'socket') as socket:
+            with patch.object(m,'MONITOR_ENABLE_FILE',Path(directory)/'absent'):
+                m.UsbMonitorPublisher(Mock()).tick();socket.assert_not_called()
 
     def test_host_info_wire_format_and_validation(self):
         info={'agent_host':'192.0.2.10','agent_port':9091,'bluetooth_address':'02:00:00:00:00:01','pc_name':'linux-pc'}

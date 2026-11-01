@@ -40,7 +40,7 @@ class BluetoothAttachTests(unittest.TestCase):
             calls.append(request)
             return 0
         try:
-            with patch.object(m,'STOP',True),patch.object(m.fcntl,'ioctl',side_effect=ioctl),patch.object(m.socket,'socket'):
+            with patch.object(m,'Path') as path,patch.object(m.subprocess,'run'),patch.object(m,'STOP',True),patch.object(m.fcntl,'ioctl',side_effect=ioctl),patch.object(m.socket,'socket'):
                 m.attach_uart(os.ttyname(slave))
             self.assertEqual(calls,[termios.TIOCSETD,0x400455CB,0x400455C8,0x800455CA,termios.TIOCSETD])
         finally:
@@ -57,6 +57,16 @@ class BluetoothAttachTests(unittest.TestCase):
             path.return_value.__truediv__.return_value.resolve.return_value.parts=('devices','usb','hci1')
             self.assertFalse(m.restore_power_after_restart(1,'/dev/ttyUSB0'))
             run.assert_not_called()
+
+    def test_usb_control_integrity(self):
+        import struct,binascii
+        for code,action in [(0,'network-off'),(1,'network-on'),(2,'monitor-off'),(3,'monitor-on')]:
+            body=struct.pack('<2sBBBHHB',b'BN',1,0x90,0,0,0,code)
+            packet=b'\x04\xff\x0c'+body+struct.pack('<H',binascii.crc_hqx(body,0xffff))
+            self.assertEqual(m.requested_usb_action(packet),action)
+            for index in range(len(packet)):
+                bad=bytearray(packet);bad[index]^=1
+                self.assertIsNone(m.requested_usb_action(bytes(bad)))
 
     def test_duplicate_mac_blocks_registration(self):
         with patch.object(m.subprocess,'run',return_value=subprocess.CompletedProcess([],0,'Controller 02:00:00:00:00:01 BC-250 [default]\n','')):

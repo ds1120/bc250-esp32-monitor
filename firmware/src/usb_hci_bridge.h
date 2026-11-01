@@ -6,13 +6,15 @@
 #include "hci_h4.h"
 #include "usb_monitor_protocol.h"
 #include "usb_info_protocol.h"
+#include "usb_network_bridge.h"
 
 // Controller only. Linux BlueZ supplies the Bluetooth host stack over USB-UART.
 // GamepadWake and this bridge must never own the radio at the same time.
 class UsbHciBridge {
     struct Packet{uint16_t length;uint8_t data[HciH4Parser::CAPACITY];};
-    QueueHandle_t queue=nullptr,monitorQueue=nullptr,infoQueue=nullptr,finalQueue=nullptr;
-    uint8_t shutdownChallenge[16]={};
+    QueueHandle_t queue=nullptr,monitorQueue=nullptr,infoQueue=nullptr,networkQueue=nullptr;
+    UsbNetworkBridge network;
+    volatile bool monitorEnabled=false,networkEnabled=false;
     Packet output{};size_t offset=0;
     HciH4Parser input;
     volatile bool active=false,requested=false,restartNotice=false;
@@ -32,6 +34,10 @@ class UsbHciBridge {
         Packet packet;packet.length=length;memcpy(packet.data,bytes,length);
         if(xQueueSend(self->queue,&packet,0)!=pdTRUE)self->dropped++;
         return 0;
+    }
+    static bool networkReceive(const uint8_t*bytes,size_t n){
+        auto self=instance();if(!self||!self->networkQueue||!n||n>HciH4Parser::CAPACITY)return false;
+        Packet p;p.length=n;memcpy(p.data,bytes,n);return xQueueSend(self->networkQueue,&p,0)==pdTRUE;
     }
     static void worker(void* arg){
         auto self=static_cast<UsbHciBridge*>(arg);
@@ -53,9 +59,10 @@ public:
         if(!queue)queue=xQueueCreate(6,sizeof(Packet));
         if(!monitorQueue)monitorQueue=xQueueCreate(1,sizeof(UsbMonitorProtocol::Sample));
         if(!infoQueue)infoQueue=xQueueCreate(1,sizeof(UsbInfoProtocol::Info));
-        if(!finalQueue)finalQueue=xQueueCreate(1,72);
+        if(!networkQueue)networkQueue=xQueueCreate(2,sizeof(Packet));
+        network.begin(networkReceive);
         if(!mutex)mutex=xSemaphoreCreateMutex();
-        if(!queue||!monitorQueue||!infoQueue||!finalQueue||!mutex){error="bridge_allocation_failed";return false;}
+        if(!queue||!monitorQueue||!infoQueue||!networkQueue||!mutex){error="bridge_allocation_failed";return false;}
         if(xTaskCreatePinnedToCore(worker,"usb-hci",4096,this,2,&task,1)!=pdPASS){error="bridge_task_failed";return false;}
         return true;
     }
@@ -66,22 +73,20 @@ public:
     void setMonitorInterval(uint32_t interval){monitorInterval=interval;}
     bool takeMonitor(UsbMonitorProtocol::Sample& sample){return monitorQueue&&xQueueReceive(monitorQueue,&sample,0)==pdTRUE;}
     bool takeInfo(UsbInfoProtocol::Info& info){return infoQueue&&xQueueReceive(infoQueue,&info,0)==pdTRUE;}
-    void setShutdownChallenge(const char* hex){
-        bool locked=mutex&&xSemaphoreTake(mutex,portMAX_DELAY)==pdTRUE;
-        for(unsigned i=0;i<16;i++){char pair[3]={hex[i*2],hex[i*2+1],0};shutdownChallenge[i]=strtoul(pair,nullptr,16);}
-        if(locked)xSemaphoreGive(mutex);
-    }
-    bool takeFinal(uint8_t*data){return finalQueue&&xQueueReceive(finalQueue,data,0)==pdTRUE;}
+    void setFeatures(bool monitoring,bool internet){monitorEnabled=monitoring;networkEnabled=internet;}
+    bool requestPC(uint8_t action){uint8_t packet[16];packet[0]=4;packet[1]=0xff;size_t n=UsbNetworkProtocol::encode(packet+3,UsbNetworkProtocol::CONTROL,0,0,0,&action,1);packet[2]=n;return networkReceive(packet,n+3);}
+    void networkStatus(JsonObject doc){network.status(doc);}
     bool stop(){
         if(active&&esp_bt_controller_get_status()==ESP_BT_CONTROLLER_STATUS_ENABLED){
             esp_err_t result=esp_bt_controller_disable();
             if(result!=ESP_OK){error="disable: "+String(result);return false;}
         }
         active=false;input.reset();output.length=0;offset=0;
-        if(queue)xQueueReset(queue);
+        if(queue)xQueueReset(queue);if(networkQueue)xQueueReset(networkQueue);
         return true;
     }
     void service(bool shouldRun){
+        network.setAllowed(shouldRun&&networkEnabled);
         if(!shouldRun){
             stop();
             // Linux may leave final HCI commands in USB RX at shutdown.
@@ -116,17 +121,16 @@ public:
                 if(monitorCommand){
                     UsbMonitorProtocol::Sample sample;
                     bool valid=UsbMonitorProtocol::decode(bytes+4,input.size()-4,sample);
-                    if(valid&&monitorQueue)xQueueOverwrite(monitorQueue,&sample);
-                    uint8_t reply[25]={4,0x0e,22,1,static_cast<uint8_t>(UsbMonitorProtocol::OPCODE),static_cast<uint8_t>(UsbMonitorProtocol::OPCODE>>8),static_cast<uint8_t>(valid?0:0x12),static_cast<uint8_t>(monitorInterval),static_cast<uint8_t>(monitorInterval>>8)};
-                    memcpy(reply+9,shutdownChallenge,16);receive(reply,sizeof(reply));
+                    if(valid&&monitorEnabled&&monitorQueue)xQueueOverwrite(monitorQueue,&sample);
+                    uint8_t reply[]={4,0x0e,6,1,static_cast<uint8_t>(UsbMonitorProtocol::OPCODE),static_cast<uint8_t>(UsbMonitorProtocol::OPCODE>>8),static_cast<uint8_t>(!monitorEnabled?0x0c:valid?0:0x12),static_cast<uint8_t>(monitorInterval),static_cast<uint8_t>(monitorInterval>>8)};
+                    receive(reply,sizeof(reply));
                 }else if(bytes[0]==1&&bytes[1]==(UsbInfoProtocol::OPCODE&255)&&bytes[2]==(UsbInfoProtocol::OPCODE>>8)){
                     UsbInfoProtocol::Info info;bool valid=UsbInfoProtocol::decode(bytes+4,input.size()-4,info);
-                    if(valid&&infoQueue)xQueueOverwrite(infoQueue,&info);
-                    uint8_t reply[]={4,0x0e,4,1,0xf1,0xfc,static_cast<uint8_t>(valid?0:0x12)};receive(reply,sizeof(reply));
-                }else if(bytes[0]==1&&bytes[1]==0xf3&&bytes[2]==0xfc){
-                    bool valid=input.size()==76&&!memcmp(bytes+4,"BC250F2\0",8);
-                    if(valid&&finalQueue)xQueueOverwrite(finalQueue,bytes+4);
-                    uint8_t reply[]={4,0x0e,4,1,0xf3,0xfc,static_cast<uint8_t>(valid?0:0x12)};receive(reply,sizeof(reply));
+                    if(valid&&monitorEnabled&&infoQueue)xQueueOverwrite(infoQueue,&info);
+                    uint8_t reply[]={4,0x0e,4,1,0xf1,0xfc,static_cast<uint8_t>(!monitorEnabled?0x0c:valid?0:0x12)};receive(reply,sizeof(reply));
+                }else if(bytes[0]==1&&bytes[1]==0xf2&&bytes[2]==0xfc){
+                    uint16_t session=0,sequence=0;uint8_t status=network.accept(bytes+4,input.size()-4,session,sequence);
+                    uint8_t reply[]={4,0x0e,9,1,0xf2,0xfc,0,static_cast<uint8_t>(session),static_cast<uint8_t>(session>>8),static_cast<uint8_t>(sequence),static_cast<uint8_t>(sequence>>8),status};receive(reply,sizeof(reply));
                 }else {if(!esp_vhci_host_check_send_available())break;esp_vhci_host_send_packet(const_cast<uint8_t*>(bytes),input.size());}
                 sent++;input.reset();
             }
@@ -136,7 +140,7 @@ public:
         }
         for(unsigned budget=0;budget<6;budget++){
             if(offset==output.length){
-                if(xQueueReceive(queue,&output,0)!=pdTRUE)break;
+                if(xQueueReceive(queue,&output,0)!=pdTRUE&&xQueueReceive(networkQueue,&output,0)!=pdTRUE)break;
                 offset=0;received++;
             }
             int room=Serial.availableForWrite();if(room<=0)break;

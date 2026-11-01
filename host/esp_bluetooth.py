@@ -4,6 +4,7 @@
 Uses the Linux H4 line discipline; no uploader or DTR/RTS reset pulses.
 The kernel HCI Reset command resets Bluetooth only, never ESP32 GPIOs.
 """
+import binascii
 import argparse
 import fcntl
 import json
@@ -45,6 +46,26 @@ def is_controller_restart(packet):
     # A user turning Bluetooth off does not emit this event.
     return packet == b'\x04\x10\x01\x01'
 
+def requested_usb_action(packet):
+    if len(packet)!=15 or packet[:3]!=b'\x04\xff\x0c':return None
+    body=packet[3:]
+    if binascii.crc_hqx(body[:-2],0xffff)!=int.from_bytes(body[-2:],'little'):return None
+    if struct.unpack('<2sBBBHH',body[:9])!=(b'BN',1,0x90,0,0,0):return None
+    return {0:'network-off',1:'network-on',2:'monitor-off',3:'monitor-on'}.get(body[9])
+
+
+def request_usb_action(action,index,device):
+    hci=Path('/sys/class/bluetooth')/f'hci{index}'
+    if Path(device).resolve().name not in hci.resolve().parts:return False
+    if action in ('monitor-on','monitor-off'):
+        marker=Path('/run/bc250-usb-features/monitor.enabled')
+        if action=='monitor-on':marker.write_text('enabled from authenticated panel UI\n');marker.chmod(0o600)
+        else:marker.unlink(missing_ok=True)
+        return True
+    if action not in ('network-on','network-off'):return False
+    return subprocess.run(['/usr/bin/systemctl','--no-block','start' if action=='network-on' else 'stop','bc250-esp-network.service'],capture_output=True,text=True,timeout=5).returncode==0
+
+
 def restore_power_after_restart(index, device):
     hci = Path('/sys/class/bluetooth') / f'hci{index}'
     if Path(device).resolve().name not in hci.resolve().parts:
@@ -63,6 +84,8 @@ def attach_uart(device):
     speed is B0 and HCI Reset times out. tcsetattr here sets both speeds using
     the platform's B921600 constant. Do not pulse DTR/RTS or enable HUPCL.
     """
+    Path('/run/bc250-usb-features/monitor.enabled').unlink(missing_ok=True)
+    subprocess.run(['/usr/bin/systemctl','--no-block','stop','bc250-esp-network.service'],capture_output=True,timeout=5)
     fd = os.open(device, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
     attached = False
     events = None
@@ -86,7 +109,7 @@ def attach_uart(device):
         log(f'Kernel H4 controller hci{index} attached at 921600 baud')
         events = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_RAW, socket.BTPROTO_HCI)
         events.setblocking(False)
-        events.setsockopt(0, 2, struct.pack('<IIIH2x', 1 << 4, 1 << 16, 0, 0))
+        events.setsockopt(0, 2, struct.pack('<IIIH2x', 1 << 4, 1 << 16, 1 << 31, 0))
         events.bind((index, 0))
         retry_at = 0
         retries = 0
@@ -96,9 +119,12 @@ def attach_uart(device):
                     packet = events.recv(260)
                 except BlockingIOError:
                     packet = b''
+                action=requested_usb_action(packet)
+                if action:
+                    log('USB feature request: '+action+' accepted='+str(request_usb_action(action,index,device)))
                 if is_controller_restart(packet):
-                    log('ESP32 restarted; scheduling Bluetooth power recovery')
-                    retry_at, retries = time.monotonic() + 2, 0
+                    log('ESP32 enabled/restarted USB; reattaching HCI transport')
+                    return
             if retry_at and time.monotonic() >= retry_at:
                 try:
                     recovered = restore_power_after_restart(index, device)
@@ -218,6 +244,7 @@ def main():
     # skipped before hci_uart created /sys/class/bluetooth. Start it again
     # before asking BlueZ to check for duplicate controller identities.
     subprocess.run(['/usr/bin/systemctl', 'start', 'bluetooth.service'], check=True)
+    Path('/run/bc250-usb-features/monitor.enabled').unlink(missing_ok=True)
     supervise(device, mac)
 
 

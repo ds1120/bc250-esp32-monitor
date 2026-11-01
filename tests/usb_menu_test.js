@@ -1,0 +1,23 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const code=fs.readFileSync('sdcard/bc250/app.js','utf8');
+const elements=new Map();const document={getElementById(id){if(!elements.has(id))elements.set(id,{});return elements.get(id)}};
+const context={document,usbFeatureBusy:false};vm.createContext(context);
+vm.runInContext(code.slice(code.indexOf('function showUSBFeatures(s)')),context);
+function render(flags,extra={}){context.showUSBFeatures({usb_features:flags,relay_output:'HIGH',...extra})}
+render({bluetooth:false,monitoring:false,internet:false});
+assert.equal(elements.get('usb-bluetooth-on').disabled,false);
+assert.equal(elements.get('usb-monitoring-on').disabled,true);
+assert.equal(elements.get('usb-internet-on').disabled,true);
+render({bluetooth:true,monitoring:false,internet:false});
+assert.equal(elements.get('usb-monitoring-on').disabled,false);
+assert.equal(elements.get('usb-bluetooth-off').disabled,false);
+render({bluetooth:true,monitoring:true,internet:false});
+assert.equal(elements.get('usb-bluetooth-off').disabled,true);
+assert.equal(elements.get('usb-monitoring-off').disabled,false);
+render({bluetooth:true,monitoring:false,internet:false},{relay_output:'LOW'});
+assert.equal(elements.get('usb-internet-on').disabled,true);
+render({bluetooth:true,monitoring:false,internet:false},{ota_in_progress:true});
+assert.equal(elements.get('usb-bluetooth-off').disabled,true);
+render(undefined);
+assert.equal(elements.get('usb-bluetooth-on').disabled,true);
+console.log('PASS: USB menu dependencies, relay-off/OTA protection and old-firmware handling');

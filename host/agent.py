@@ -14,7 +14,6 @@ import re
 import socket
 import struct
 import configparser
-import uuid
 
 try:
     from usb_monitor import UsbMonitorPublisher,find_controller,adapter_address
@@ -76,26 +75,7 @@ class FinalShutdownPacket:
     def __init__(self, token, destination=Path('/run/bc250-power-manager/final-packet')):
         self.token, self.destination = token, destination
         self.last = None
-        self.last_usb = None
         self.lock = threading.Lock()
-
-    def prepare_usb(self,device,nonce):
-        if len(nonce)!=16 or not any(nonce):return
-        target=Path(device).resolve()
-        if not re.fullmatch(r'/dev/ttyUSB[0-9]+',str(target)):return
-        boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
-        identity=(str(target),nonce,boot)
-        with self.lock:
-            if self.last_usb==identity:return
-            message=f'bc250-usb-poweroff-v1|{boot}|{nonce.hex()}'.encode()
-            signature=hmac.new(self.token.encode(),message,hashlib.sha256).digest()
-            payload=b'BC250F2\0'+uuid.UUID(boot).bytes+nonce+signature
-            packet=struct.pack('<BHB',1,0xfcf3,len(payload))+payload
-            data=b'BC250U1\n'+str(target).encode().ljust(32,b'\0')+boot.encode()+struct.pack('!H',len(packet))+packet
-            destination=self.destination.with_name('final-usb-packet')
-            destination.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
-            temporary=destination.with_suffix('.tmp');temporary.write_bytes(data);temporary.chmod(0o600);temporary.replace(destination)
-            self.last_usb=identity
 
     @staticmethod
     def frame(source_mac, target_mac, source_ip, target_ip, payload):
@@ -220,8 +200,9 @@ class Metrics:
             return result
 
 class Controller:
-    def __init__(self, token, runner=None, metrics=None):
+    def __init__(self, token, runner=None, metrics=None, power_block_file=Path('/etc/bc250-power-manager/block-power-actions')):
         self.token = token
+        self.power_block_file = power_block_file
         self.runner = runner or subprocess.run
         self.lock = threading.Lock()
         self.pending = None
@@ -237,6 +218,8 @@ class Controller:
     def request(self, action):
         if action not in ('shutdown','reboot'):
             return 400, {'error':'invalid_action'}
+        if self.power_block_file.exists():
+            return 423, {'error':'power_actions_temporarily_blocked'}
         with self.lock:
             if self.pending:
                 return 409, {'error':'action_already_pending'}
@@ -311,6 +294,7 @@ def make_handler(controller):
             except (ValueError, OSError):
                 return self.reply(400, {'error':'invalid_request'})
             status, data = controller.request(self.path.rsplit('/',1)[-1])
+            print(json.dumps({'event':'power_request','source':self.client_address[0],'action':self.path.rsplit('/',1)[-1],'status':status,'error':data.get('error')}),flush=True)
             self.reply(status, data)
     return Handler
 

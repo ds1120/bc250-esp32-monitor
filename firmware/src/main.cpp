@@ -31,7 +31,7 @@ extern "C" bool btInUse(){return true;}
 
 // GPIO22 drives relay IN (H mode). Boot OFF; explicit ON holds until OFF/reset.
 // Only an authenticated, current-boot final poweroff signal schedules automatic OFF.
-constexpr const char* FIRMWARE_VERSION="bc250-monitor-5.8.1";
+constexpr const char* FIRMWARE_VERSION="bc250-monitor-5.8.3";
 TFT_eSPI lcd;
 TFT_eSprite lineSprite(&lcd);
 TFT_eSprite metricSprite(&lcd),animationSprite(&lcd);
@@ -47,9 +47,9 @@ GamepadWake gamepadWake;
 UsbHciBridge usbHci;
 RTC_NOINIT_ATTR RelayRestartTicket restartTicket;
 bool relayResumedAfterRestart=false;
-bool usbHciEnabled=false;
-void consolePrintln(const String& value=""){if(!usbHciEnabled)Serial.println(value);}
-template<typename... Args> void consolePrintf(const char* format,Args... args){if(!usbHciEnabled)Serial.printf(format,args...);}
+bool usbHciEnabled=false,usbMonitoringEnabled=false,usbInternetEnabled=false,usbConsoleSuppressed=false;
+void consolePrintln(const String& value=""){if(!usbHciEnabled&&!usbConsoleSuppressed)Serial.println(value);}
+template<typename... Args> void consolePrintf(const char* format,Args... args){if(!usbHciEnabled&&!usbConsoleSuppressed)Serial.printf(format,args...);}
 String defaultGamepadConfig(){
     uint8_t mac[6];esp_read_mac(mac,ESP_MAC_BT);char value[96];
     snprintf(value,sizeof(value),"{\"host_mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",\"controllers\":[]}",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);return String(value);
@@ -123,7 +123,6 @@ String currentNonce(){
 void renewShutdownNonce(){
     char value[33];for(int i=0;i<4;i++)snprintf(value+i*8,9,"%08lx",static_cast<unsigned long>(esp_random()));
     portENTER_CRITICAL(&stateLock);memcpy(shutdownNonce,value,sizeof(value));portEXIT_CRITICAL(&stateLock);
-    usbHci.setShutdownChallenge(value);
     autoCutPending=false;
 }
 
@@ -210,6 +209,8 @@ bool ready() {State s=snapshot();return configured&&(usbMonitorFresh()||WiFi.sta
 String statusJson() {
     State s=snapshot(); RelayState rs=relaySnapshot(); DynamicJsonDocument doc(4096);
     usbHci.status(doc.createNestedObject("usb_bluetooth"),usbHciEnabled);
+    JsonObject features=doc.createNestedObject("usb_features");features["bluetooth"]=usbHciEnabled;features["monitoring"]=usbMonitoringEnabled;features["internet"]=usbInternetEnabled;features["reset_on_restart"]=true;
+    usbHci.networkStatus(doc.createNestedObject("emergency_network"));
     doc["firmware"]=FIRMWARE_VERSION; doc["wifi_connected"]=WiFi.status()==WL_CONNECTED;
     doc["ip"]=WiFi.localIP().toString(); doc["target"]=host; doc["configured"]=configured;
     doc["agent_online"]=s.online && millis()-s.checked<10000;
@@ -341,6 +342,7 @@ void uploadFirmware(){
         otaSucceeded=false;otaError="";otaRelayAbi.reset();
         if(!configured||!web.authenticate("bc250",pin.c_str())){otaError="unauthorized";return;}
         if(web.header("X-BC250-UI")!="1"){otaError="invalid_request";return;}
+        if(web.client().remoteIP()==WiFi.localIP()){otaError="use_phone_or_direct_lan";return;}
         if(otaRebootAt||autoCutPending){otaError="shutdown_or_restart_pending";return;}
         if(!gamepadWake.stop()){otaError="standby_radio_busy";return;}
         String checksum=web.header("X-Firmware-SHA256");
@@ -380,17 +382,26 @@ void startWeb() {
         metricsPollMs=interval;savePadSD();
         web.send(200,"application/json","{\"saved\":true,\"stale_after_seconds\":10}");
     });
-    web.on("/api/usb-bluetooth",HTTP_POST,[]{
+    web.on("/api/usb-features",HTTP_POST,[]{
         if(!authenticate())return;
-        if(web.header("X-BC250-UI")!="1"||web.arg("plain").length()>128){web.send(403,"application/json","{}");return;}
-        if(relaySnapshot().high||ready()||autoCutPending||otaActive||otaRebootAt){
-            web.send(409,"application/json","{\"error\":\"shutdown_pc_first\"}");return;
+        if(web.header("X-BC250-UI")!="1"||web.arg("plain").length()>160){web.send(403,"application/json","{}");return;}
+        if(otaActive||otaRebootAt||autoCutPending||!relaySnapshot().high){web.send(409,"application/json","{\"error\":\"device_busy\"}");return;}
+        StaticJsonDocument<160> d;
+        if(deserializeJson(d,web.arg("plain"))||!d["enabled"].is<bool>()||!d["feature"].is<const char*>()){web.send(400,"application/json","{}");return;}
+        String feature=d["feature"].as<String>();bool on=d["enabled"];
+        if(feature!="bluetooth"&&feature!="monitoring"&&feature!="internet"){web.send(400,"application/json","{}");return;}
+        if((feature!="bluetooth"&&on&&!usbHciEnabled)||(feature=="bluetooth"&&!on&&(usbMonitoringEnabled||usbInternetEnabled))){web.send(409,"application/json","{\"error\":\"bluetooth_transport_required\"}");return;}
+        if(feature=="bluetooth"){
+            if(on&&!usbHciEnabled){usbConsoleSuppressed=true;Serial.flush();Serial.updateBaudRate(UsbHciBridge::BAUD);usbHciEnabled=true;usbHci.notifyHostRestart();}
+            else if(!on){usbHciEnabled=false;usbHci.poll(false);}
+        }else if(feature=="monitoring"){
+            if(!usbHci.running()||!usbHci.requestPC(on?3:2)){web.send(503,"application/json","{\"error\":\"usb_not_ready\"}");return;}
+            usbMonitoringEnabled=on;if(!on)usbMonitorReceived=false;
+        }else{
+            if(!usbHci.running()||!usbHci.requestPC(on?1:0)){web.send(503,"application/json","{\"error\":\"usb_not_ready\"}");return;}
+            usbInternetEnabled=on;
         }
-        StaticJsonDocument<192> doc;
-        if(deserializeJson(doc,web.arg("plain"))||!doc["enabled"].is<bool>()){web.send(400,"application/json","{}");return;}
-        if(!config.putBool("usb_hci",doc["enabled"].as<bool>())){web.send(500,"application/json","{}");return;}
-        web.send(202,"application/json","{\"saved\":true,\"restarting\":true}");
-        otaRebootAt=millis()+700;
+        web.send(202,"application/json","{\"requested\":true}");
     });
     web.on("/api/display",HTTP_POST,[]{
         if(!authenticate())return;
@@ -627,22 +638,7 @@ void wakeDisplay(){
     displayManuallyOff=false;
     if(!displayAwake){page=relaySnapshot().high?2:0;confirmation="";screenActivityAt=millis();displayAwake=true;suppressWakeTouch=true;wakeTouchReleaseAt=0;wakeTouchGuardUntil=millis()+350;draw();digitalWrite(21,HIGH);}
 }
-bool acceptUsbPoweroff(const uint8_t*packet){
-    if(memcmp(packet,"BC250F2\0",8)||!relaySnapshot().high||otaActive||otaRebootAt)return false;
-    char boot[37];const uint8_t*b=packet+8;
-    snprintf(boot,sizeof(boot),"%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7],b[8],b[9],b[10],b[11],b[12],b[13],b[14],b[15]);
-    if(snapshot().bootId!=boot)return false;
-    char nonce[33];for(unsigned i=0;i<16;i++)snprintf(nonce+2*i,3,"%02x",packet[24+i]);
-    if(currentNonce()!=nonce)return false;
-    String message="bc250-usb-poweroff-v1|"+String(boot)+"|"+String(nonce);uint8_t digest[32],difference=0;
-    if(mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),reinterpret_cast<const uint8_t*>(token.c_str()),token.length(),reinterpret_cast<const uint8_t*>(message.c_str()),message.length(),digest)!=0)return false;
-    for(unsigned i=0;i<32;i++)difference|=digest[i]^packet[40+i];
-    return difference==0;
-}
 void pollAutomaticPoweroff(){
-    uint8_t usbFinal[72];
-    if(usbHci.takeFinal(usbFinal)&&acceptUsbPoweroff(usbFinal)&&!autoCutPending){autoCutPending=true;shutdownSignalAt=millis();consolePrintln("{\"event\":\"final_shutdown_usb_accepted\"}");}
-
     int size=shutdownUDP.parsePacket();
     if(size>0){
         char packet[384];IPAddress expected;expected.fromString(host);
@@ -751,14 +747,15 @@ void setup() {
     initializeRelay();
     renewShutdownNonce();
     config.begin("bc250-pm",false);loadConfig();
-    usbHciEnabled=config.getBool("usb_hci",configured);
+    usbHciEnabled=false; // Test features always start OFF, including after OTA.
+    usbConsoleSuppressed=configured;
     metricsPollMs=config.getUInt("metrics_ms",5000);
     if(metricsPollMs<1000||metricsPollMs>5000)metricsPollMs=5000;
     if(usbHciEnabled){
         Serial.setRxBufferSize(4096);Serial.setTxBufferSize(2048);
         esp_log_level_set("*",ESP_LOG_NONE);
     }
-    Serial.begin(usbHciEnabled?UsbHciBridge::BAUD:115200);delay(200);
+    Serial.begin(configured?UsbHciBridge::BAUD:115200);delay(200);
     gamepadWakeDisabled=config.getBool("pad_disabled",false);
     gamepadManual=config.getBool("pad_manual",false);
     gamepadConfig=config.getString("pad_cfg",defaultGamepadConfig());
@@ -770,7 +767,7 @@ void setup() {
     }
     // Reserve the contiguous controller memory before allocating LCD/Wi-Fi buffers.
     if(usbHciEnabled||!gamepadWakeDisabled)gamepadWake.reserveController();
-    if(usbHciEnabled){usbHci.begin();if(relayResumedAfterRestart)usbHci.notifyHostRestart();}
+    usbHci.begin();
     pinMode(0,INPUT_PULLUP);
     digitalWrite(21,LOW);pinMode(21,OUTPUT);lcd.init();lcd.setRotation(1);lcd.invertDisplay(false);digitalWrite(21,HIGH);
     lineSprite.setColorDepth(16);lineSprite.createSprite(296,22);
@@ -808,12 +805,13 @@ void loop() {
     }
     if(usbHciEnabled){
         usbHci.setMonitorInterval(metricsPollMs);
+        usbHci.setFeatures(usbMonitoringEnabled,usbInternetEnabled);
         bool run=relaySnapshot().high&&!otaActive&&!otaRebootAt;
         if(run&&!usbHci.running())gamepadWake.stop();
         usbHci.poll(run);
     }
     UsbInfoProtocol::Info info;
-    if(usbHciEnabled&&usbHci.takeInfo(info)){
+    if(usbHciEnabled&&usbMonitoringEnabled&&usbHci.takeInfo(info)){
         bool changed=false;
         if(RuntimeSettings::fillMissing(host,IPAddress(info.ip).toString())){
             agentPort=info.port;
@@ -826,7 +824,7 @@ void loop() {
         if(changed&&sdReady)savePadSD();
     }
     UsbMonitorProtocol::Sample monitor;
-    if(usbHciEnabled&&usbHci.takeMonitor(monitor)&&relaySnapshot().high){
+    if(usbHciEnabled&&usbMonitoringEnabled&&usbHci.takeMonitor(monitor)&&relaySnapshot().high){
         Telemetry m;float* values[]={&m.cpu,&m.cpuTemp,&m.gpu,&m.gpuTemp,&m.ramUsed,&m.ramTotal,&m.vramUsed,&m.vramTotal};
         for(unsigned i=0;i<8;i++)*values[i]=monitor.values[i];
         char boot[37];snprintf(boot,sizeof(boot),"%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",monitor.boot[0],monitor.boot[1],monitor.boot[2],monitor.boot[3],monitor.boot[4],monitor.boot[5],monitor.boot[6],monitor.boot[7],monitor.boot[8],monitor.boot[9],monitor.boot[10],monitor.boot[11],monitor.boot[12],monitor.boot[13],monitor.boot[14],monitor.boot[15]);
@@ -856,7 +854,7 @@ void loop() {
         if(!wasAsleep){nextPage();draw();}
     }
     bootWasDown=bootDown;
-    while(!usbHciEnabled&&Serial.available()) {char ch=Serial.read();if(ch=='\n'){serialCommand(serialLine);serialLine="";}else if(ch!='\r'){if(serialLine.length()<511)serialLine+=ch;else serialLine="";}}
+    while(!usbHciEnabled&&!usbConsoleSuppressed&&Serial.available()) {char ch=Serial.read();if(ch=='\n'){serialCommand(serialLine);serialLine="";}else if(ch!='\r'){if(serialLine.length()<511)serialLine+=ch;else serialLine="";}}
     if(confirmation.length()&&millis()-confirmationAt>15000)confirmation="";
     if(displayAwake&&page!=1&&millis()-screenActivityAt>=MONITOR_RETURN_MS){page=1;confirmation="";draw();}
     if(displayAwake&&millis()-lastDraw>lcdRefreshMs){lastDraw=millis();draw();}
