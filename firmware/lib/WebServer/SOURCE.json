@@ -1,0 +1,8 @@
+{
+  "upstream": "https://github.com/espressif/arduino-esp32",
+  "tag": "2.0.17",
+  "path": "libraries/WebServer",
+  "library_version": "2.0.0",
+  "license": "LGPL-2.1-or-later",
+  "local_change": "Bound _uploadReadByte waiting for connected-but-silent upload to 10 seconds; close client and return -1 so UPLOAD_FILE_ABORTED runs."
+}

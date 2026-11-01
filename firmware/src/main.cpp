@@ -31,7 +31,7 @@ extern "C" bool btInUse(){return true;}
 
 // GPIO22 drives relay IN (H mode). Boot OFF; explicit ON holds until OFF/reset.
 // Only an authenticated, current-boot final poweroff signal schedules automatic OFF.
-constexpr const char* FIRMWARE_VERSION="bc250-monitor-5.8.3";
+constexpr const char* FIRMWARE_VERSION="bc250-monitor-5.8.4";
 TFT_eSPI lcd;
 TFT_eSprite lineSprite(&lcd);
 TFT_eSprite metricSprite(&lcd),animationSprite(&lcd);
@@ -98,7 +98,8 @@ bool autoCutPending=false;
 uint32_t shutdownSignalAt=0;
 char shutdownNonce[33]={};
 void wakeDisplay();
-bool otaActive=false,otaSucceeded=false,otaHashActive=false;
+bool otaActive=false,otaSucceeded=false,otaHashActive=false,otaPowerSaveChanged=false;
+wifi_ps_type_t otaPreviousPowerSave=WIFI_PS_MIN_MODEM;
 String otaError;
 uint32_t otaRebootAt=0,lastAnimation=0;
 mbedtls_sha256_context otaHash;
@@ -332,8 +333,9 @@ bool authenticate() {
 }
 #include "sd_content.h"
 
+void restoreOtaPowerSave(){if(otaPowerSaveChanged){WiFi.setSleep(otaPreviousPowerSave);otaPowerSaveChanged=false;}}
 void abortOta(const char* reason){
-    otaError=reason;otaActive=false;Update.abort();
+    otaError=reason;otaActive=false;Update.abort();restoreOtaPowerSave();
     if(otaHashActive){mbedtls_sha256_free(&otaHash);otaHashActive=false;}
 }
 void uploadFirmware(){
@@ -350,6 +352,7 @@ void uploadFirmware(){
         for(int i=0;i<64;i++)if(!isxdigit(static_cast<unsigned char>(checksum[i]))){otaError="invalid_checksum";return;}
         for(int i=0;i<32;i++)otaExpected[i]=strtoul(checksum.substring(i*2,i*2+2).c_str(),nullptr,16);
         if(!Update.begin(UPDATE_SIZE_UNKNOWN)){otaError="update_unavailable";return;}
+        otaPreviousPowerSave=WiFi.getSleep();otaPowerSaveChanged=WiFi.setSleep(false);
         mbedtls_sha256_init(&otaHash);mbedtls_sha256_starts_ret(&otaHash,0);otaHashActive=true;otaActive=true;
     }else if(upload.status==UPLOAD_FILE_WRITE&&otaActive){
         otaRelayAbi.feed(upload.buf,upload.currentSize);
@@ -361,7 +364,7 @@ void uploadFirmware(){
         if(difference){abortOta("checksum_mismatch");return;}
         if(relaySnapshot().high&&!otaRelayAbi.compatible()){abortOta("firmware_cannot_keep_relay_power");return;}
         otaSucceeded=Update.end(true);otaActive=false;mbedtls_sha256_free(&otaHash);otaHashActive=false;
-        if(!otaSucceeded)otaError="invalid_firmware";
+        if(!otaSucceeded){otaError="invalid_firmware";restoreOtaPowerSave();}
     }else if(upload.status==UPLOAD_FILE_ABORTED&&otaActive)abortOta("upload_aborted");
 }
 void startWeb() {

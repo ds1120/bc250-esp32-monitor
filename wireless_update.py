@@ -2,11 +2,34 @@
 import argparse
 import base64
 import hashlib
+import http.client
+import socket
 import json
 from pathlib import Path
 import secrets
 import time
 import urllib.request
+
+
+def make_opener(tcp_mss=0):
+    if not tcp_mss:return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    def connect(address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None):
+        last=None
+        for family,kind,protocol,_,target in socket.getaddrinfo(address[0],address[1],0,socket.SOCK_STREAM):
+            sock=socket.socket(family,kind,protocol)
+            try:
+                sock.setsockopt(socket.IPPROTO_TCP,socket.TCP_MAXSEG,tcp_mss)
+                if timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:sock.settimeout(timeout)
+                if source_address:sock.bind(source_address)
+                sock.connect(target);return sock
+            except OSError as exc:last=exc;sock.close()
+        raise last or OSError('No address available')
+    class Connection(http.client.HTTPConnection):
+        def __init__(self,*args,**kwargs):
+            super().__init__(*args,**kwargs);self._create_connection=connect
+    class Handler(urllib.request.HTTPHandler):
+        def http_open(self,request):return self.do_open(Connection,request)
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}),Handler())
 
 
 def main():
@@ -16,11 +39,15 @@ def main():
     parser.add_argument('--firmware',type=Path,default=Path(__file__).resolve().parent/'binaries/firmware.bin')
     parser.add_argument('--keep-power-test',action='store_true',help='Explicitly test OTA while the BC250 relay stays ON; save all work first')
     parser.add_argument('--expected-version',help='Expected full firmware version after reboot')
+    parser.add_argument('--tcp-mss',type=int,default=536,help='TCP segment limit: 536 by default for ESP32 uploads; 0 uses the system default')
+    parser.add_argument('--upload-timeout',type=int,default=120,help='Upload socket timeout in seconds (10..300)')
     parser.add_argument('--report',type=Path,help='Save credential-free update verification here')
     args=parser.parse_args()
+    if args.tcp_mss and not 536<=args.tcp_mss<=1460:parser.error('--tcp-mss must be 0 or 536..1460')
+    if not 10<=args.upload_timeout<=300:parser.error('--upload-timeout must be 10..300 seconds')
     settings=json.loads(args.settings.read_text(encoding='utf-8-sig'))
     authorization='Basic '+base64.b64encode(('bc250:'+settings['pin']).encode()).decode()
-    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    opener=make_opener(args.tcp_mss)
     def status():
         with opener.open(urllib.request.Request('http://'+args.panel+'/api/status',
                          headers={'Authorization':authorization}),timeout=4) as response:return json.load(response)
@@ -41,7 +68,8 @@ def main():
     request=urllib.request.Request('http://'+args.panel+'/api/update',data=body,
              headers={'Authorization':authorization,'X-BC250-UI':'1','X-Firmware-SHA256':digest,
                       'Content-Type':'multipart/form-data; boundary='+boundary},method='POST')
-    with opener.open(request,timeout=45) as response:assert json.load(response)['updated'] is True
+    print(json.dumps({'upload_started':True,'bytes':len(image),'timeout_seconds':args.upload_timeout}),flush=True)
+    with opener.open(request,timeout=args.upload_timeout) as response:assert json.load(response)['updated'] is True
     time.sleep(3)
     for attempt in range(20):
         try:

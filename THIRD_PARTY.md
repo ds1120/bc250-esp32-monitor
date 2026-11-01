@@ -9,3 +9,5 @@
 저장소의 MIT 라이선스는 외부 구성 요소의 기존 권리를 대체하지 않습니다. 배포 시 실제 사용 버전의 라이선스도 확인해주세요.
 
 - 선택적 비상 인터넷 PC 도구: [tun2socks v2.7.0](https://github.com/xjasonlyu/tun2socks/releases/tag/v2.7.0), MIT. [라이선스](licenses/tun2socks.LICENSE)를 보존하며 공식 ZIP의 SHA-256을 설치기에 고정했습니다. ESP32 펌웨어에 해당 실행 파일을 포함하지 않습니다.
+
+- Arduino-ESP32 WebServer 2.0.17 소스의 라이브러리 버전 2.0.0 — LGPL-2.1-or-later. `firmware/lib/WebServer/`에 원 저작권·라이선스와 전체 소스를 보존했습니다. 업로드 무수신 대기를 10초로 제한한 수정은 `SOURCE.json`에 기록했습니다. 프로젝트의 나머지 코드에 적용되는 MIT와 구분합니다.

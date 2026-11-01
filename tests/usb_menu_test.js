@@ -21,3 +21,13 @@ assert.equal(elements.get('usb-bluetooth-off').disabled,true);
 render(undefined);
 assert.equal(elements.get('usb-bluetooth-on').disabled,true);
 console.log('PASS: USB menu dependencies, relay-off/OTA protection and old-firmware handling');
+// Older cached HTML must delegate to the new endpoint, not show a version error.
+const alias=code.split('\n').find(line=>line.startsWith('async function setUSBBluetooth('));
+assert(alias);let delegated;
+context.setUSBFeature=(feature,enabled)=>{delegated={feature,enabled}};
+vm.runInContext(alias,context);context.setUSBBluetooth(true);
+assert.deepEqual(delegated,{feature:'bluetooth',enabled:true});
+assert(!code.includes("fetch('/api/usb-bluetooth'"));
+const html=fs.readFileSync('sdcard/bc250/index.html','utf8');
+assert(!html.includes('onclick="setUSBBluetooth('));
+console.log('PASS: legacy button delegates to current USB API; obsolete buttons removed');

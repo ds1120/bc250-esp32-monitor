@@ -24,23 +24,25 @@ ESP32-based monitoring, relay power management, and a Linux Bluetooth adapter fo
 
 ## 버전과 검증
 
+5.8.4는 이전 USB Bluetooth 버튼이 삭제된 API를 호출해 ‘펌웨어 5.5 이상’ 오류를 표시하던 화면 버그를 수정합니다. 중복 버튼을 제거하고 이전 화면의 버튼 호출도 새 API로 연결합니다. 웹서버의 업로드 무수신 대기를 10초로 제한하고 PC 업로더 기본 제한을 120초로 늘렸습니다.
+
 현재 장치에는 예기치 않은 종료 조사용 **원격 종료·재부팅 요청 임시 차단**이 적용돼 있습니다. USB-C 미연결 정상 부팅은 사용자 확인을 받았으며 USB-C 핫플러그 뒤 PC 실행은 유지됐지만 Bluetooth 초기화 타임아웃이 관찰됐습니다. [진단 기록과 차단 동작](docs/BOOT_DIAGNOSIS.md)을 확인하세요.
 
-안정 공개판: **5.7**. 현재 장치 시험 빌드: **5.8.3** (USB 기능 개별 시험 메뉴, 부팅 문제 조사 중), PlatformIO 환경: **`st7789`**.
+안정 공개판: **5.7**. 현재 장치 시험 빌드: **5.8.4** (USB 기능 개별 시험 메뉴, 부팅 문제 조사 중), PlatformIO 환경: **`st7789`**.
 
 | 항목 | 확인 결과 |
 |---|---|
 | 펌웨어 빌드·OTA 슬롯 용량·RTC 재시작 ABI | 통과 |
-| Python 테스트 | 24개 통과 |
+| Python 테스트 | 26개 통과 |
 | H4, USB 정보 Python↔C++ 호환, 누락 항목 병합 정책 | 통과 |
-| 실제 5.8.1 → 5.8.3 OTA | PC 실행과 부팅 ID 유지, 릴레이 HIGH 복구 확인 |
+| 실제 5.8.3 → 5.8.4 OTA | PC 실행과 부팅 ID 유지, 릴레이 HIGH 복구 확인 |
 | Bluetooth 초기화 | 핫플러그에서 타임아웃 관찰. 새 제어 도구 재연동 검증 대기 |
 | USB 시험 메뉴 | 세 기능 기본 OFF, API 의존성·인증 보호 검사 통과. 인터넷 실물 검증 전 |
 | SD 관리자 화면 | 5.8.3 기본 화면 복원, 동작 설정 보존 확인 |
 | 완전히 빈 새 보드·빈 SD의 전체 최초 설치 | 아직 전체 실물 검증 전 |
 | 실제 GPIO의 순간 파형·정전·브라운아웃·EN 리셋 | 출력 연속성 미계측·미보장 |
 
-실제 판정은 [`binaries/verification-5.8.3.json`](binaries/verification-5.8.3.json)을 확인하세요. 실제 배선 쇼트 가능성은 소프트웨어가 진단하거나 방지하지 못합니다. 사용하지 않는 단자를 각각 절연하고 전원 배선은 별도로 검증해야 합니다.
+실제 판정은 [`binaries/verification-5.8.4.json`](binaries/verification-5.8.4.json)을 확인하세요. 실제 배선 쇼트 가능성은 소프트웨어가 진단하거나 방지하지 못합니다. 사용하지 않는 단자를 각각 절연하고 전원 배선은 별도로 검증해야 합니다.
 
 ## 파일 구성
 
@@ -92,7 +94,7 @@ python3 -m venv .venv
 # 호환 파티션을 가진 보드: 기존 NVS/터치 보정을 보존하는 앱 설치
 .venv/bin/python flash_panel.py --port /dev/ttyUSB0 \
   --factory-backup factory.private.bin \
-  --firmware binaries/bc250-monitor-5.8.3.bin --power-isolated
+  --firmware binaries/bc250-monitor-5.8.4.bin --power-isolated
 
 # 최초 Wi-Fi/PIN 설정. 기존 비밀 설정 파일이 있으면 누락된 값만 입력
 .venv/bin/python configure.py --port /dev/ttyUSB0 --power-isolated
@@ -110,7 +112,7 @@ sudo .venv/bin/python host/install_local.py \
 
 ## 이후 업데이트
 
-관리자 화면의 **무선 업데이트**에서 앱 파일 `binaries/bc250-monitor-5.8.3.bin`을 선택합니다. Wi-Fi·PIN·토큰과 기존 터치 보정은 NVS에 남습니다. SD 화면은 업데이트 시 사용자 파일을 자동 덮어쓰지 않으므로, 새 기본 화면이 필요하면 ‘펌웨어 기본화면으로 복원’을 선택하세요.
+관리자 화면의 **무선 업데이트**에서 앱 파일 `binaries/bc250-monitor-5.8.4.bin`을 선택합니다. Wi-Fi·PIN·토큰과 기존 터치 보정은 NVS에 남습니다. SD 화면은 업데이트 시 사용자 파일을 자동 덮어쓰지 않으므로, 새 기본 화면이 필요하면 ‘펌웨어 기본화면으로 복원’을 선택하세요.
 
 보조전원 없는 시험은 현재 장치에서 성공했지만 예정된 OTA 소프트웨어 재부팅에 한정됩니다. USB 업로더·전원 상실·EN 리셋까지 보장하는 기능은 아닙니다. 릴레이가 OFF이면 PC 본체 버튼만으로 켜지지 않을 수 있어 ESP32 전원을 확보한 뒤 관리자 화면에서 전원 공급을 켜야 합니다.
 
@@ -118,7 +120,7 @@ sudo .venv/bin/python host/install_local.py \
 # 기본은 PC가 꺼진 상태의 OTA
 .venv/bin/python wireless_update.py --panel <현재 ESP32 IP> \
   --settings "$HOME/.config/bc250-monitor/setup.json" \
-  --firmware binaries/bc250-monitor-5.8.3.bin
+  --firmware binaries/bc250-monitor-5.8.4.bin
 ```
 
 전원 유지 시험은 작업을 저장한 뒤 `--keep-power-test`를 명시합니다. 관리자 HTTP API는 신뢰할 수 있는 LAN에서 사용하며 인터넷에 직접 노출하지 마세요.

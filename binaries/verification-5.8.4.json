@@ -1,0 +1,22 @@
+{
+  "wireless_update_verified": true,
+  "firmware": "bc250-monitor-5.8.4",
+  "partition_before": "app1",
+  "partition_after": "app0",
+  "sha256": "2469fe3fb5e7ff91d05493414a1cb3c9cd9f0531f6d842b69f45e68be1c8e486",
+  "saved_settings_preserved": true,
+  "keep_power_test": true,
+  "relay_resumed_after_restart": true,
+  "pc_boot_id_unchanged": true,
+  "physical_gpio_continuity_measured": false,
+  "python_tests_passed": 26,
+  "usb_menu_and_legacy_button_tests_passed": true,
+  "live_sd_ui_fixed": true,
+  "usb_control_api_off_request_status": 202,
+  "usb_features_left_off": true,
+  "stalled_upload_reader_tested": true,
+  "real_interrupted_upload_on_584_tested": false,
+  "tcp_mss_used": 536,
+  "remote_power_actions_blocked": true,
+  "live_bluetooth_internet_tested": false
+}
