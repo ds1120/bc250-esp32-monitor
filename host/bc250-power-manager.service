@@ -1,0 +1,25 @@
+[Unit]
+Description=BC250 monitoring and confirmed final-shutdown power management
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /var/lib/bc250-power-manager/agent.py
+Restart=on-failure
+RestartSec=3
+User=root
+UMask=0077
+RuntimeDirectory=bc250-power-manager
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_UNIX AF_NETLINK AF_BLUETOOTH
+
+[Install]
+WantedBy=multi-user.target

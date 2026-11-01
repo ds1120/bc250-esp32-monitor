@@ -1,0 +1,23 @@
+[Unit]
+Description=BC250 ESP32 standard Bluetooth controller over USB UART
+After=systemd-udevd.service bluetooth.service
+Wants=bluetooth.service
+ConditionPathExists=/etc/bc250-esp-bluetooth.json
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -I /usr/local/lib/bc250/esp_bluetooth.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=8
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_BLUETOOTH AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target
