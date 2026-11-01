@@ -6,7 +6,7 @@ from pathlib import Path
 def main():
  p=argparse.ArgumentParser(description=__doc__)
  p.add_argument('--port');p.add_argument('--settings',type=Path,default=Path.home()/'.config/bc250-monitor/setup.json')
- p.add_argument('--ssid');p.add_argument('--host',help='Optional Wi-Fi-only companion IP; omitted means USB discovery')
+ p.add_argument('--ssid');p.add_argument('--host',help='Wi-Fi companion IP; set this or configure network.agent_host on SD')
  p.add_argument('--power-isolated',action='store_true',help='Confirm PC/relay power is isolated for first provisioning')
  a=p.parse_args()
  if not a.power_isolated:p.error('First provisioning requires --power-isolated; never reconfigure a running relay controller')

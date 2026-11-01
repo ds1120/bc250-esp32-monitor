@@ -89,6 +89,19 @@ void applySDSettings(JsonObject d,bool live){
     }
     if(live)invalidateDisplay();
     if(live&&gamepadWakeDisabled)gamepadWake.stop();
+    if(live)persistCoreSettings();
+}
+// Cache the active operating settings in NVS so removing SD keeps core functions.
+bool persistCoreSettings(){
+    bool ok=true;
+    auto text=[&](const char*key,const String&value){if(config.getString(key,"")!=value)ok=(config.putString(key,value)==value.length())&&ok;};
+    text("host",host);text("pad_cfg",gamepadConfig);text("pc_name",learnedPcName);text("learned_bt",learnedBluetooth);
+    if(config.getUShort("agent_port",9091)!=agentPort)ok=(config.putUShort("agent_port",agentPort)>0)&&ok;
+    if(config.getUInt("metrics_ms",5000)!=metricsPollMs)ok=(config.putUInt("metrics_ms",metricsPollMs)>0)&&ok;
+    if(config.getUInt("monitor_return",20000)!=MONITOR_RETURN_MS)ok=(config.putUInt("monitor_return",MONITOR_RETURN_MS)>0)&&ok;
+    if(config.getBool("pad_manual",false)!=gamepadManual)ok=(config.putBool("pad_manual",gamepadManual)>0)&&ok;
+    if(config.getBool("pad_disabled",false)!=gamepadWakeDisabled)ok=(config.putBool("pad_disabled",gamepadWakeDisabled)>0)&&ok;
+    return ok;
 }
 bool readSDSettings(const String& path,DynamicJsonDocument& doc){
     File file=SD.open(path,FILE_READ);
@@ -114,7 +127,7 @@ void currentSDSettings(JsonObject doc){
     doc["schema"]=1;
     JsonObject net=doc.createNestedObject("network");net["agent_host"]=host;net["agent_port"]=agentPort;
     JsonObject dev=doc.createNestedObject("device");dev["pc_name"]=learnedPcName;dev["bluetooth_address"]=learnedBluetooth;
-    dev["usb_baud"]=UsbHciBridge::BAUD;doc["monitor_return_seconds"]=MONITOR_RETURN_MS/1000;
+    doc["monitor_return_seconds"]=MONITOR_RETURN_MS/1000;
     doc["metrics_poll_ms"]=static_cast<uint32_t>(metricsPollMs);
     doc["gamepad_enabled"]=!gamepadWakeDisabled;doc["gamepad_manual"]=gamepadManual;
     JsonObject lcd=doc.createNestedObject("lcd");lcd["background_rgb565"]=BACKGROUND;lcd["accent_rgb565"]=lcdAccent;
@@ -124,6 +137,7 @@ void currentSDSettings(JsonObject doc){
 }
 bool commitSDFile(const String& path){return SDPolicy::commit(SD,path);}
 void savePadSD(){
+    persistCoreSettings();
     if(!sdReady)return;
     DynamicJsonDocument doc(6144);currentSDSettings(doc.to<JsonObject>());
     String path=sdPath("settings.json");SD.remove(path+".tmp");

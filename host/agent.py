@@ -16,9 +16,8 @@ import struct
 import configparser
 
 try:
-    from usb_monitor import UsbMonitorPublisher,find_controller,adapter_address
+    from usb_monitor import find_controller,adapter_address
 except ImportError:
-    UsbMonitorPublisher = None
     find_controller = adapter_address = None
 
 
@@ -308,7 +307,6 @@ if __name__=='__main__':
     if len(token)!=64 or any(c not in '0123456789abcdef' for c in token):
         raise SystemExit('Invalid token file')
     controller=Controller(token)
-    if UsbMonitorPublisher is not None:UsbMonitorPublisher(controller,agent_port=args.port).start()
     server=ThreadingHTTPServer((args.bind,args.port),make_handler(controller))
     server.daemon_threads=True
     server.serve_forever()

@@ -4,7 +4,7 @@ import argparse,json,os,shutil,subprocess,sys,tempfile
 from pathlib import Path
 
 def main():
- p=argparse.ArgumentParser(description=__doc__);p.add_argument('--settings',type=Path,required=True);p.add_argument('--device');p.add_argument('--bluetooth-address');p.add_argument('--lan-cidr');a=p.parse_args()
+ p=argparse.ArgumentParser(description=__doc__);p.add_argument('--settings',type=Path,required=True);p.add_argument('--lan-cidr');a=p.parse_args()
  if os.geteuid()!=0:p.error('Run with sudo; root is needed only for installation')
  settings=json.loads(a.settings.read_text());token=settings['token']
  if len(token)!=64 or any(c not in '0123456789abcdef' for c in token):p.error('Invalid token')
@@ -17,9 +17,5 @@ def main():
   (stage/'token').write_text(token+'\n');(stage/'token').chmod(0o600)
   (stage/'installation.json').write_text(json.dumps({'lan_cidr':a.lan_cidr}))
   subprocess.run([sys.executable,str(stage/'install_remote.py')],check=True)
-  args=[sys.executable,str(root/'install_esp_bluetooth.py')]
-  if a.device:args+=['--device',a.device]
-  if a.bluetooth_address:args+=['--bluetooth-address',a.bluetooth_address]
-  subprocess.run(args,check=True)
- print('Installed for next boot. First startup learns missing PC/Bluetooth information over USB and saves it to SD.')
+ print('Wi-Fi companion installed. Configure the panel agent_host with this PC address; USB transport is not installed.')
 if __name__=='__main__':main()
