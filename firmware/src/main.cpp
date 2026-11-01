@@ -31,7 +31,7 @@ extern "C" bool btInUse(){return true;}
 
 // GPIO22 drives relay IN (H mode). Boot OFF; explicit ON holds until OFF/reset.
 // Only an authenticated, current-boot final poweroff signal schedules automatic OFF.
-constexpr const char* FIRMWARE_VERSION="bc250-monitor-5.7";
+constexpr const char* FIRMWARE_VERSION="bc250-monitor-5.8.1";
 TFT_eSPI lcd;
 TFT_eSprite lineSprite(&lcd);
 TFT_eSprite metricSprite(&lcd),animationSprite(&lcd);
@@ -123,6 +123,7 @@ String currentNonce(){
 void renewShutdownNonce(){
     char value[33];for(int i=0;i<4;i++)snprintf(value+i*8,9,"%08lx",static_cast<unsigned long>(esp_random()));
     portENTER_CRITICAL(&stateLock);memcpy(shutdownNonce,value,sizeof(value));portEXIT_CRITICAL(&stateLock);
+    usbHci.setShutdownChallenge(value);
     autoCutPending=false;
 }
 
@@ -626,7 +627,22 @@ void wakeDisplay(){
     displayManuallyOff=false;
     if(!displayAwake){page=relaySnapshot().high?2:0;confirmation="";screenActivityAt=millis();displayAwake=true;suppressWakeTouch=true;wakeTouchReleaseAt=0;wakeTouchGuardUntil=millis()+350;draw();digitalWrite(21,HIGH);}
 }
+bool acceptUsbPoweroff(const uint8_t*packet){
+    if(memcmp(packet,"BC250F2\0",8)||!relaySnapshot().high||otaActive||otaRebootAt)return false;
+    char boot[37];const uint8_t*b=packet+8;
+    snprintf(boot,sizeof(boot),"%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7],b[8],b[9],b[10],b[11],b[12],b[13],b[14],b[15]);
+    if(snapshot().bootId!=boot)return false;
+    char nonce[33];for(unsigned i=0;i<16;i++)snprintf(nonce+2*i,3,"%02x",packet[24+i]);
+    if(currentNonce()!=nonce)return false;
+    String message="bc250-usb-poweroff-v1|"+String(boot)+"|"+String(nonce);uint8_t digest[32],difference=0;
+    if(mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),reinterpret_cast<const uint8_t*>(token.c_str()),token.length(),reinterpret_cast<const uint8_t*>(message.c_str()),message.length(),digest)!=0)return false;
+    for(unsigned i=0;i<32;i++)difference|=digest[i]^packet[40+i];
+    return difference==0;
+}
 void pollAutomaticPoweroff(){
+    uint8_t usbFinal[72];
+    if(usbHci.takeFinal(usbFinal)&&acceptUsbPoweroff(usbFinal)&&!autoCutPending){autoCutPending=true;shutdownSignalAt=millis();consolePrintln("{\"event\":\"final_shutdown_usb_accepted\"}");}
+
     int size=shutdownUDP.parsePacket();
     if(size>0){
         char packet[384];IPAddress expected;expected.fromString(host);

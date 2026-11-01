@@ -18,6 +18,8 @@
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <unistd.h>
+#include <termios.h>
+#include <poll.h>
 
 static int storage_safe(void) {
     struct statvfs fs;
@@ -36,6 +38,45 @@ static int storage_safe(void) {
     return safe;
 }
 
+/* USB notification is pre-signed by the live agent; never sign or run Python
+ * in final shutdown. No DTR/RTS reset pulses and no HUPCL on close. */
+static int final_usb(int inspect) {
+    unsigned char data[512];
+    int fd=open("/run/bc250-power-manager/final-usb-packet",O_RDONLY|O_NOFOLLOW|O_CLOEXEC);
+    if(fd<0)return 1;
+    struct stat st;
+    if(fstat(fd,&st)||!S_ISREG(st.st_mode)||st.st_uid||(st.st_mode&077)){close(fd);return 1;}
+    ssize_t size=read(fd,data,sizeof(data));close(fd);
+    if(size<78||memcmp(data,"BC250U1\n",8))return 1;
+    size_t length=((unsigned)data[76]<<8)|data[77];
+    if(length!=76||size!=(ssize_t)(78+length)||memcmp(data+78,"\x01\xf3\xfc\x48",4)||memcmp(data+82,"BC250F2\0",8))return 1;
+    char path[33],boot[37],current[64];memcpy(path,data+8,32);path[32]=0;memcpy(boot,data+40,36);boot[36]=0;
+    if(strncmp(path,"/dev/ttyUSB",11))return 1;
+    if(!path[11])return 1;
+    for(unsigned i=11;path[i];i++)if(path[i]<'0'||path[i]>'9')return 1;
+    FILE*file=fopen("/proc/sys/kernel/random/boot_id","r");
+    if(!file||!fgets(current,sizeof(current),file)){if(file)fclose(file);return 1;}
+    fclose(file);if(strncmp(current,boot,36))return 1;
+    if(inspect){printf("Valid current-boot USB final packet: device=%s bytes=%zu storage_safe=%d; no frame sent\n",path,length,storage_safe());return 0;}
+    fd=open(path,O_RDWR|O_NOCTTY|O_NONBLOCK|O_CLOEXEC);
+    if(fd<0)return 1;
+    struct termios settings;
+    if(tcgetattr(fd,&settings)){close(fd);return 1;}
+    cfmakeraw(&settings);settings.c_cflag=CS8|CREAD|CLOCAL;
+    cfsetispeed(&settings,B921600);cfsetospeed(&settings,B921600);
+    int discipline=0;
+    if(ioctl(fd,TIOCSETD,&discipline)||tcsetattr(fd,TCSANOW,&settings)){close(fd);return 1;}
+    size_t offset=0;
+    for(int i=0;i<20&&offset<length;i++){
+        ssize_t n=write(fd,data+78+offset,length-offset);
+        if(n>0)offset+=(size_t)n;
+        else if(n<0&&errno!=EAGAIN&&errno!=EINTR){close(fd);return 1;}
+        usleep(50000);
+    }
+    for(int i=0;i<20;i++){int queued=0;if(ioctl(fd,TIOCOUTQ,&queued)||queued==0)break;usleep(50000);}
+    usleep(20000);close(fd);return offset==length?0:1;
+}
+
 int main(int argc, char **argv) {
     int inspect = argc == 2 && !strcmp(argv[1], "--inspect");
     if (argc != 2 || (!inspect && strcmp(argv[1], "poweroff"))) return 0;
@@ -43,6 +84,7 @@ int main(int argc, char **argv) {
         fputs("BC250: no final notification: disk filesystems still writable\n", stderr);
         return 75;
     }
+    if(final_usb(inspect)==0)return 0;
     unsigned char data[1024];
     int fd = open("/run/bc250-power-manager/final-packet", O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
     if (fd < 0) return 1;

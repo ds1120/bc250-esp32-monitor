@@ -9,6 +9,7 @@ import unittest
 import socket
 import struct
 import os
+import hmac,hashlib,uuid
 from urllib.request import Request, build_opener, ProxyHandler
 from urllib.error import HTTPError
 from http.server import ThreadingHTTPServer
@@ -52,6 +53,24 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(ip[16:20],socket.inet_aton('192.0.2.20'))
         self.assertEqual(struct.unpack('!HHHH',frame[34:42]),(9093,9092,8+len(payload),0))
         self.assertEqual(frame[42:],payload)
+
+    def test_usb_final_packet_is_bound_to_boot_and_nonce(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);packet=agent.FinalShutdownPacket('test-token',root/'final-packet')
+            nonce=bytes(range(16));packet.prepare_usb('/dev/ttyUSB0',nonce)
+            target=root/'final-usb-packet';data=target.read_bytes()
+            self.assertEqual(len(data),154);self.assertEqual(target.stat().st_mode&0o777,0o600)
+            boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+            self.assertEqual(data[40:76].decode(),boot)
+            self.assertEqual(data[78:82],b'\x01\xf3\xfc\x48')
+            payload=data[82:];self.assertEqual(payload[:8],b'BC250F2\0')
+            self.assertEqual(payload[8:24],uuid.UUID(boot).bytes);self.assertEqual(payload[24:40],nonce)
+            expected=hmac.new(b'test-token',f'bc250-usb-poweroff-v1|{boot}|{nonce.hex()}'.encode(),hashlib.sha256).digest()
+            self.assertEqual(payload[40:],expected)
+            before=target.stat().st_mtime_ns;packet.prepare_usb('/dev/ttyUSB0',nonce)
+            self.assertEqual(target.stat().st_mtime_ns,before)
+            packet.prepare_usb('/dev/ttyS0',nonce);packet.prepare_usb('/dev/ttyUSB0',bytes(16))
+            self.assertEqual(target.read_bytes(),data)
 
     def test_kernel_counters_missing_sensors_and_cpu_delta(self):
         with tempfile.TemporaryDirectory() as directory:

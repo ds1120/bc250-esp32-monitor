@@ -17,6 +17,7 @@ import struct
 import termios
 import socket
 import select
+import binascii
 
 CONFIG = Path('/etc/bc250-esp-bluetooth.json')
 STOP = False
@@ -43,7 +44,6 @@ def is_controller_restart(packet):
     # ESP32 sends standard HCI Hardware Error after a planned MCU restart.
     # A user turning Bluetooth off does not emit this event.
     return packet == b'\x04\x10\x01\x01'
-
 
 def restore_power_after_restart(index, device):
     hci = Path('/sys/class/bluetooth') / f'hci{index}'

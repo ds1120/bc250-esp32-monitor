@@ -1,0 +1,23 @@
+{
+  "wireless_update_verified": true,
+  "firmware": "bc250-monitor-5.8.1",
+  "partition_before": "app1",
+  "partition_after": "app0",
+  "sha256": "fda85f12cd3d37c0829a440e8d514899ffefbf706ec1b2b1a80cd11f22146378",
+  "saved_settings_preserved": true,
+  "keep_power_test": true,
+  "relay_resumed_after_restart": true,
+  "pc_boot_id_unchanged": true,
+  "physical_gpio_continuity_measured": false,
+  "usb_emergency_network_compiled_in": false,
+  "emergency_network_service_active": false,
+  "emergency_network_service_enabled": false,
+  "sd_admin_ui_updated": true,
+  "sd_settings_preserved": true,
+  "bluetooth_and_monitoring_code_retained": true,
+  "usb_connected_cold_boot_tested": false,
+  "host_bluetooth_controller_available_after_update": false,
+  "python_tests_passed": 17,
+  "cpp_hci_tests_passed": true,
+  "rtc_restart_abi_verified": "0x50000200"
+}

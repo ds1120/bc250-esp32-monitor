@@ -35,7 +35,7 @@ int main(int argc,char** argv){
     UsbMonitorProtocol::Sample sample;assert(bridge.takeMonitor(sample));
     assert(sample.running&&sample.uptime==123&&sample.values[0]==25.5f);
     assert(mockCommands.size()==3); // Vendor sample never reached the BT controller.
-    assert(Serial.output==std::vector<uint8_t>({4,14,6,1,0xf0,0xfc,0,0xb8,0x0b}));
+    assert(Serial.output.size()==25&&std::equal(Serial.output.begin(),Serial.output.begin()+9,std::vector<uint8_t>({4,14,22,1,0xf0,0xfc,0,0xb8,0x0b}).begin()));
  }
  if(argc>2){
     std::ifstream file(argv[2],std::ios::binary);std::vector<uint8_t> data((std::istreambuf_iterator<char>(file)),{});
@@ -45,7 +45,7 @@ int main(int argc,char** argv){
     assert(mockCommands.size()==3&&Serial.output==std::vector<uint8_t>({4,14,4,1,0xf1,0xfc,0}));
  }
  Serial.room=2048;Serial.output.clear();Serial.input={1,0xf0,0xfc,0};bridge.service(true);bridge.service(true);
- assert(mockCommands.size()==3&&Serial.output.size()==9&&Serial.output[6]==0x12);
+ assert(mockCommands.size()==3&&Serial.output.size()==25&&Serial.output[6]==0x12);
  Serial.output.clear();bridge.service(false);bridge.notifyHostRestart();mockTime+=1000;bridge.service(true);
  assert(Serial.output==std::vector<uint8_t>({4,0x10,1,1}));
  bridge.service(true);assert(Serial.output.size()==4);
