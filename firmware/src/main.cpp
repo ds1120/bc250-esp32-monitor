@@ -30,7 +30,7 @@ extern "C" bool btInUse(){return true;}
 
 // GPIO22 drives relay IN (H mode). Boot OFF; explicit ON holds until OFF/reset.
 // Only an authenticated, current-boot final poweroff signal schedules automatic OFF.
-constexpr const char* FIRMWARE_VERSION="bc250-monitor-5.8.5";
+constexpr const char* FIRMWARE_VERSION="bc250-monitor-5.8.6";
 TFT_eSPI lcd;
 TFT_eSprite lineSprite(&lcd);
 TFT_eSprite metricSprite(&lcd),animationSprite(&lcd);
@@ -47,6 +47,7 @@ GamepadWake gamepadWake;
 RTC_NOINIT_ATTR RelayRestartTicket restartTicket;
 bool relayResumedAfterRestart=false;
 bool serialSetupEnabled=false;
+bool gamepadConfigRecovered=false;
 void consolePrintln(const String& value=""){if(serialSetupEnabled)Serial.println(value);}
 template<typename... Args> void consolePrintf(const char* format,Args... args){if(serialSetupEnabled)Serial.printf(format,args...);}
 String defaultGamepadConfig(){
@@ -206,7 +207,7 @@ bool recentMetrics(const State& s){return s.hasGood&&millis()-s.lastGood<10000;}
 bool ready() {State s=snapshot();return configured&&(WiFi.status()==WL_CONNECTED)&&s.online&&millis()-s.checked<10000;}
 String statusJson() {
     State s=snapshot(); RelayState rs=relaySnapshot(); DynamicJsonDocument doc(4096);
-    doc["firmware"]=FIRMWARE_VERSION; doc["wifi_connected"]=WiFi.status()==WL_CONNECTED;
+    doc["admin_login_required"]=false;doc["gamepad_config_recovered"]=gamepadConfigRecovered;doc["firmware"]=FIRMWARE_VERSION; doc["wifi_connected"]=WiFi.status()==WL_CONNECTED;
     doc["ip"]=WiFi.localIP().toString(); doc["target"]=host; doc["configured"]=configured;
     doc["agent_online"]=s.online && millis()-s.checked<10000;
     doc["metrics_available"]=recentMetrics(s);doc["metrics_stale"]=recentMetrics(s)&&!doc["agent_online"].as<bool>();
@@ -323,8 +324,8 @@ void networkTask(void*) {
 #include "web_page.h"
 
 bool authenticate() {
-    if (configured && web.authenticate("bc250",pin.c_str())) return true;
-    web.requestAuthentication(); return false;
+    if(configured)return true;
+    web.send(503,"application/json","{\"error\":\"setup_required\"}");return false;
 }
 #include "sd_content.h"
 
@@ -337,7 +338,7 @@ void uploadFirmware(){
     HTTPUpload& upload=web.upload();
     if(upload.status==UPLOAD_FILE_START){
         otaSucceeded=false;otaError="";otaRelayAbi.reset();
-        if(!configured||!web.authenticate("bc250",pin.c_str())){otaError="unauthorized";return;}
+        if(!configured){otaError="setup_required";return;}
         if(web.header("X-BC250-UI")!="1"){otaError="invalid_request";return;}
         if(web.client().remoteIP()==WiFi.localIP()){otaError="use_phone_or_direct_lan";return;}
         if(otaRebootAt||autoCutPending){otaError="shutdown_or_restart_pending";return;}
@@ -608,7 +609,7 @@ void draw() {
         button(12,"SHUT DOWN",ready()?0x9b68:0x3186); button(166,"RESTART",ready()?0x328c:0x3186);
     }
     text("Web: "+WiFi.localIP().toString(),201,TFT_WHITE,1);
-    text("User: bc250  PIN: "+(configured?pin:"--"),216,TFT_LIGHTGREY,1);
+    text("LAN admin: no login",216,TFT_LIGHTGREY,1);
     text("BOOT / title: Monitor > OS > PSU",230,TFT_LIGHTGREY,1);
 }
 void wakeDisplay(){
@@ -684,7 +685,7 @@ void loadConfig() {
     token=config.getString("token","");host=config.getString("host","");pin=config.getString("pin","");
     agentPort=config.getUShort("agent_port",9091);
     learnedPcName=config.getString("pc_name","");learnedBluetooth=config.getString("learned_bt","");
-    configured=ssid.length()>0&&token.length()==64&&pin.length()>=6;
+    configured=ssid.length()>0&&token.length()==64;
 }
 void serialCommand(const String& line) {
     if(line=="status") {consolePrintln(statusJson());return;}
@@ -716,7 +717,7 @@ void serialCommand(const String& line) {
     if(relaySnapshot().high){consolePrintln("{\"error\":\"turn_relay_off_before_configuration\"}");return;}
     String a=doc["ssid"]|"",b=doc["password"]|"",c=doc["token"]|"",d=doc["host"]|"",e=doc["pin"]|"";
     IPAddress ip;bool hex=c.length()==64;for(char ch:c)hex=hex&&(isxdigit(static_cast<unsigned char>(ch))!=0);
-    if(!a.length()||a.length()>32||b.length()>63||!hex||(d.length()&&!ip.fromString(d))||e.length()<6||e.length()>16) {consolePrintln("{\"error\":\"invalid_configuration\"}");return;}
+    if(!a.length()||a.length()>32||b.length()>63||!hex||(d.length()&&!ip.fromString(d))||e.length()>16) {consolePrintln("{\"error\":\"invalid_configuration\"}");return;}
     bool ok=config.putString("ssid",a)>0&&config.putString("wifi_pw",b)>0&&config.putString("token",c)>0&&(config.putString("host",d)>0||!d.length())&&config.putString("pin",e)>0;
     consolePrintf("{\"event\":\"provisioned\",\"success\":%s}\n",ok?"true":"false");
     if(ok) {Serial.flush();delay(100);restartWithRelayState();}
@@ -736,11 +737,19 @@ void setup() {
     gamepadConfig=config.getString("pad_cfg",defaultGamepadConfig());
     mountSD();
     loadSDSettings(false);
-    persistCoreSettings();
     {
         DynamicJsonDocument pads(2048);
-        if(!deserializeJson(pads,gamepadConfig)&&gamepadWake.configure(pads.as<JsonObject>()))gamepadWake.prepareIdentity();
+        if(deserializeJson(pads,gamepadConfig)||!gamepadWake.configure(pads.as<JsonObject>())){
+            // Retain invalid input privately for recovery, then use a valid empty list.
+            if(gamepadConfig.length())config.putString("pad_cfg_bad",gamepadConfig);
+            gamepadConfig=defaultGamepadConfig();
+            deserializeJson(pads,gamepadConfig);
+            gamepadWake.configure(pads.as<JsonObject>());
+            gamepadConfigRecovered=true;
+        }
+        gamepadWake.prepareIdentity();
     }
+    persistCoreSettings();
     // Reserve the contiguous controller memory before allocating LCD/Wi-Fi buffers.
     if(!gamepadWakeDisabled)gamepadWake.reserveController();
     pinMode(0,INPUT_PULLUP);
@@ -756,7 +765,9 @@ void setup() {
     wakeConfigs=xQueueCreate(1,sizeof(WakeConfigMessage));
     WiFi.mode(WIFI_STA);WiFi.setHostname("bc250-panel");WiFi.setAutoReconnect(true);
     esp_wifi_stop();
-    esp_err_t macResult=esp_wifi_set_mac(WIFI_IF_STA,gamepadWake.originalStationMac());
+    // Wi-Fi identity must never depend on gamepad JSON validation.
+    uint8_t factoryStationMac[6];esp_efuse_mac_get_default(factoryStationMac);
+    esp_err_t macResult=esp_wifi_set_mac(WIFI_IF_STA,factoryStationMac);
     esp_wifi_start();
     if(macResult!=ESP_OK)consolePrintf("{\"event\":\"wifi_mac_restore_failed\",\"code\":%d}\n",macResult);
     if(configured)WiFi.begin(ssid.c_str(),password.c_str());

@@ -1,0 +1,29 @@
+{
+  "firmware": "bc250-monitor-5.8.6",
+  "sha256": "a36d531fb3e8305811140095e2d47facd8f2ae493dbeb140161c0d30e5abb5d0",
+  "bytes": 1236992,
+  "st7789_build_passed": true,
+  "wifi_ota_update_verified": true,
+  "ota_error": "",
+  "admin_without_credentials_verified": true,
+  "missing_mutation_header_rejected": true,
+  "wifi_ip_and_mac_preserved": true,
+  "private_gamepad_settings_preserved": true,
+  "gamepad_listening_and_identity_verified": true,
+  "private_gamepad_addresses_published": false,
+  "sd_removed": true,
+  "compact_popup_served": true,
+  "relay_before_and_after": "LOW",
+  "physical_gpio_continuity_measured": false,
+  "actual_gamepad_wake_tested": false,
+  "invalid_nvs_fallback_tested_on_device": false,
+  "network_python_tests_passed": 5,
+  "wifi_admin_js_test_passed": true,
+  "full_windows_suite": {
+    "tests_run": 20,
+    "failures": 1,
+    "errors": 6,
+    "skipped": 1,
+    "limitation": "Existing Linux /proc, Bluetooth sockets, symlinks, g++ and TCP_MAXSEG dependencies are not available in this Windows environment."
+  }
+}

@@ -177,7 +177,7 @@ void uploadSDFile(){
     auto& upload=web.upload();
     if(upload.status==UPLOAD_FILE_START){
         sdUploadOK=false;sdUploadError="";sdUploadBytes=0;sdUploadName=web.arg("name");
-        if(!configured||!web.authenticate("bc250",pin.c_str())||web.header("X-BC250-UI")!="1"){sdUploadError="unauthorized";return;}
+        if(!configured||web.header("X-BC250-UI")!="1"){sdUploadError="unauthorized";return;}
         if(!sdReady||otaActive||otaRebootAt||!sdName(sdUploadName)){sdUploadError="sd_unavailable_or_invalid_name";return;}
         String path=sdPath(sdUploadName)+".tmp";SD.remove(path);sdUpload=SD.open(path,FILE_WRITE);
         if(!sdUpload)sdUploadError="open_failed";

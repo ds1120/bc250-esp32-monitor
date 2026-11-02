@@ -46,7 +46,7 @@ def main():
     if args.tcp_mss and not 536<=args.tcp_mss<=1460:parser.error('--tcp-mss must be 0 or 536..1460')
     if not 10<=args.upload_timeout<=300:parser.error('--upload-timeout must be 10..300 seconds')
     settings=json.loads(args.settings.read_text(encoding='utf-8-sig'))
-    authorization='Basic '+base64.b64encode(('bc250:'+settings['pin']).encode()).decode()
+    authorization='Basic '+base64.b64encode(('bc250:'+settings.get('pin','')).encode()).decode()
     opener=make_opener(args.tcp_mss)
     def status():
         with opener.open(urllib.request.Request('http://'+args.panel+'/api/status',

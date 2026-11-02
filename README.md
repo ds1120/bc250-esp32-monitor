@@ -6,7 +6,12 @@
 
 기준 하드웨어는 **ESP32-2432S028 / ST7789**입니다. 보드 정보와 확인된 배선 범위는 [하드웨어 문서](docs/HARDWARE.md)를 먼저 확인하세요. 실제 릴레이 접점·ATX 배선도는 소유자가 추후 갱신할 예정이며 전체 배선이 검증됐다고 가정하면 안 됩니다.
 
-## 현재 버전: 5.8.5
+## 현재 버전: 5.8.6
+
+- 잘못된 패드 설정이 Wi-Fi MAC을 0으로 만드는 부팅 문제를 방지합니다. Wi-Fi는 eFuse 원래 주소를 사용하며, 잘못된 설정은 내부 `pad_cfg_bad`에 보관 후 빈 패드 목록으로 복구합니다. 정상 등록 목록·수동 모드·Wi-Fi/PIN/토큰은 유지합니다.
+- SD 상태 등 알림을 우측 하단의 작은 알림으로 변경했습니다. 확인 버튼 없이 3초 후 닫힙니다. SD 없이 내장 화면에서도 적용됩니다.
+- 개인 프로콘 주소는 장치 NVS에 보존하며 공개 소스·기본 바이너리에는 포함하지 않습니다. 패드 실물 깨우기와 GPIO 순간 파형은 별도 실측이 필요합니다.
+
 
 평상시에는 **USB-C 데이터 케이블을 연결하지 않고 Wi-Fi로 운용**합니다. USB 연결 상태에서 BC250 부팅이 진행되지 않는 문제가 5.5에서도 보고됐고, 원인은 아직 확정하지 못했습니다. 5.8.5는 관리자 화면의 USB 제어·상태·시험 메뉴와 실행 펌웨어의 USB HCI/모니터링/무선랜 통합을 제거합니다. PC USB 서비스도 사용하지 않습니다. 최초 USB 플래시/설정 도구와 이전 실험 소스는 남아 있지만, 현재 실행 기능이 아닙니다.
 
@@ -35,7 +40,7 @@
 | USB 연결 상태 부팅 문제 | 미해결; 5.5도 동일 증상 보고 |
 | GPIO 순간 파형·정전·브라운아웃·EN 리셋 | 출력 연속성 미계측·미보장 |
 
-[버전별 검증 기록](binaries/verification-5.8.5.json), [OTA 중단 대응](docs/OTA_RECOVERY.md), [부팅 진단](docs/BOOT_DIAGNOSIS.md)을 확인하세요. 예기치 않은 종료를 조사하며 걸었던 원격 종료 차단은 사용자 요청으로 해제됐습니다. 관리자 화면과 LCD 모두 사용하며 요청 출처·결과는 journal에 남습니다.
+[현재 검증 기록](binaries/verification-5.8.6.json), [OTA 중단 대응](docs/OTA_RECOVERY.md), [부팅 진단](docs/BOOT_DIAGNOSIS.md)을 확인하세요. 예기치 않은 종료를 조사하며 걸었던 원격 종료 차단은 사용자 요청으로 해제됐습니다. 관리자 화면과 LCD 모두 사용하며 요청 출처·결과는 journal에 남습니다.
 
 ## 최초 준비
 
@@ -55,7 +60,7 @@ python3 -m venv .venv
   read-flash 0x0 0x400000 factory.private.bin
 .venv/bin/python flash_panel.py --port /dev/ttyUSB0 \
   --factory-backup factory.private.bin \
-  --firmware binaries/bc250-monitor-5.8.5.bin --power-isolated
+  --firmware binaries/bc250-monitor-5.8.6.bin --power-isolated
 
 # 실제 Wi-Fi와 PC 주소를 입력. 개인 주소 기본값은 포함하지 않음
 .venv/bin/python configure.py --port /dev/ttyUSB0 \
@@ -64,7 +69,7 @@ sudo .venv/bin/python host/install_local.py \
   --settings "$HOME/.config/bc250-monitor/setup.json"
 ```
 
-새 보드의 초기 파티션 배치가 다르면 PlatformIO의 전체 업로드를 전원 분리 상태에서 수행해야 합니다. 현재 터치 코드는 NVS의 기존 affine 보정을 읽으며 새 보드용 보정 마법사는 없습니다. 보정이 없는 새 장치는 인증된 웹 관리 화면을 사용합니다. LCD는 런타임 자동 감지하지 않으며 ST7789 이외 보드는 핀/드라이버 검토가 필요합니다.
+새 보드의 초기 파티션 배치가 다르면 PlatformIO의 전체 업로드를 전원 분리 상태에서 수행해야 합니다. 현재 터치 코드는 NVS의 기존 affine 보정을 읽으며 새 보드용 보정 마법사는 없습니다. 보정이 없는 새 장치는 내부망 웹 관리 화면을 사용합니다. LCD는 런타임 자동 감지하지 않으며 ST7789 이외 보드는 핀/드라이버 검토가 필요합니다.
 
 Linux 설치기는 현재 Wi-Fi companion만 설치하며 USB 어댑터 설치기를 자동 실행하지 않습니다. PC 주소는 최초 설정 또는 SD의 `network.agent_host`에서 지정합니다. 기존 USB 자동 정보 수집은 현재 버전에 없습니다. 원격 설치는 `install_bc250.py --host <실제_PC_IP> --user <계정> --settings <개인_설정파일>`을 사용합니다.
 
@@ -76,12 +81,12 @@ SD가 없으면 내장 관리자 화면과 NVS의 핵심 설정을 사용하도�
 
 ## 이후 Wi-Fi 업데이트
 
-관리자 화면에서 `binaries/bc250-monitor-5.8.5.bin`을 선택하거나 다음 도구를 사용합니다. SD의 새 기본 화면은 별도로 ‘펌웨어 기본화면으로 복원’해야 하며 기존 동작 설정은 보존됩니다.
+관리자 화면에서 `binaries/bc250-monitor-5.8.6.bin`을 선택하거나 다음 도구를 사용합니다. SD의 새 기본 화면은 별도로 ‘펌웨어 기본화면으로 복원’해야 하며 기존 동작 설정은 보존됩니다.
 
 ```bash
 .venv/bin/python wireless_update.py --panel <현재_ESP32_IP> \
   --settings "$HOME/.config/bc250-monitor/setup.json" \
-  --firmware binaries/bc250-monitor-5.8.5.bin
+  --firmware binaries/bc250-monitor-5.8.6.bin
 ```
 
 기본은 PC가 꺼진 상태이며, 실행 중 전원 유지 시험은 작업을 저장한 뒤 `--keep-power-test`를 명시합니다. PC 업로더는 작은 TCP 세그먼트(536)와 기본 120초 제한을 사용하며 느린 링크는 `--upload-timeout 300`으로 조절합니다. 업로드가 멈췄다고 ESP32 리셋 버튼을 누르면 PC 전원이 끊길 수 있습니다. 예정된 OTA 소프트웨어 재부팅과 EN/정전/USB 업로더 리셋은 다른 조건입니다.
@@ -100,3 +105,5 @@ node tests/wifi_admin_test.js
 하드웨어 배선 재현, 빈 보드 초기 설정, 패드 깨우기 호환성, 여러 배포판, 전원/통신 복구 개선을 환영합니다. [Issues](https://github.com/ds1120/bc250-esp32-monitor/issues)와 [기여 안내](CONTRIBUTING.md)를 이용하세요. 비밀번호·PIN·토큰·IRK·전체 플래시 백업은 첨부하지 마세요.
 
 프로젝트 코드는 [MIT](LICENSE)이며 외부 라이브러리는 [THIRD_PARTY.md](THIRD_PARTY.md)와 각 파일의 라이선스를 따릅니다. 수정된 WebServer의 LGPL 라이선스와 전체 소스도 함께 제공합니다.
+
+5.8.6 관리자 페이지/API/OTA는 사용자 요청에 따라 로그인 없이 동작합니다. 같은 LAN에서 전원 제어와 업데이트가 가능하므로 신뢰할 수 있는 내부망에서 사용하며 외부 포트 개방은 전제로 하지 않습니다. Wi-Fi 접속 비밀번호와 Linux companion 토큰은 유지합니다. OTA 체크섬·요청 헤더·릴레이 보호 검사는 유지합니다. 기존 PIN 값은 마이그레이션 호환을 위해 저장돼 있어도 사용하지 않습니다.

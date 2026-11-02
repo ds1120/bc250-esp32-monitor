@@ -17,14 +17,11 @@ def main():
  if a.host is not None:settings['host']=a.host
  if not settings.get('ssid'):settings['ssid']=input('Wi-Fi SSID: ').strip()
  if 'password' not in settings:settings['password']=getpass.getpass('Wi-Fi password (empty for open network): ')
- if not settings.get('pin'):
-  first=getpass.getpass('Administrator PIN (6–16 characters): ')
-  if first!=getpass.getpass('Repeat PIN: '):p.error('PINs did not match')
-  settings['pin']=first
+ settings.setdefault('pin','')  # Legacy field retained for migration; no administrator login.
  if not settings.get('token'):settings['token']=secrets.token_hex(32)
  settings.setdefault('host','')
  if settings['host']:ipaddress.IPv4Address(settings['host'])
- if not 1<=len(settings['ssid'].encode())<=32 or len(settings['password'].encode())>63 or not 6<=len(settings['pin'])<=16:p.error('Invalid Wi-Fi/PIN lengths')
+ if not 1<=len(settings['ssid'].encode())<=32 or len(settings['password'].encode())>63 or len(settings['pin'])>16:p.error('Invalid Wi-Fi/PIN lengths')
  if len(settings['token'])!=64 or any(c not in '0123456789abcdef' for c in settings['token']):p.error('Token must be 64 lowercase hex characters')
  port=a.port or discover_usb_device()
  ser=serial.Serial();ser.port=port;ser.baudrate=115200;ser.timeout=.2;ser.write_timeout=3;ser.dtr=False;ser.rts=False
