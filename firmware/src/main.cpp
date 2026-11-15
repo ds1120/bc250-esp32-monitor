@@ -31,7 +31,7 @@ extern "C" bool btInUse(){return true;}
 
 // GPIO22 drives relay IN (H mode). Boot OFF; explicit ON holds until OFF/reset.
 // Only an authenticated, current-boot final poweroff signal schedules automatic OFF.
-constexpr const char* FIRMWARE_VERSION="bc250-monitor-5.8.7";
+constexpr const char* FIRMWARE_VERSION="bc250-monitor-5.8.8";
 TFT_eSPI lcd;
 TFT_eSprite lineSprite(&lcd);
 TFT_eSprite metricSprite(&lcd),animationSprite(&lcd);
@@ -114,8 +114,9 @@ portMUX_TYPE stateLock=portMUX_INITIALIZER_UNLOCKED;
 struct Telemetry {
     float cpu=NAN, cpuTemp=NAN, gpu=NAN, gpuTemp=NAN;
     float ramUsed=NAN, ramTotal=NAN, vramUsed=NAN, vramTotal=NAN;
+    float memoryHotspot=NAN, memoryAverage=NAN;
 };
-struct State { bool online=false; uint32_t checked=0, uptime=0,lastGood=0;bool hasGood=false;uint32_t metricAt[8]={}; int code=0; char text[64]="Waiting for Wi-Fi"; char bootId[40]={}; Telemetry metrics; } state;
+struct State { bool online=false; uint32_t checked=0, uptime=0,lastGood=0;bool hasGood=false;uint32_t metricAt[10]={}; int code=0; char text[64]="Waiting for Wi-Fi"; char bootId[40]={}; Telemetry metrics; } state;
 
 String currentNonce(){
     char value[33];portENTER_CRITICAL(&stateLock);memcpy(value,shutdownNonce,sizeof(value));portEXIT_CRITICAL(&stateLock);
@@ -193,11 +194,11 @@ void setState(bool online,int code,const char* text,uint32_t uptime=0,const Tele
     portENTER_CRITICAL(&stateLock);
     state.online=online; state.code=code; state.uptime=uptime; state.checked=millis();
     if(online){
-        const float Telemetry::* fields[]={&Telemetry::cpu,&Telemetry::cpuTemp,&Telemetry::gpu,&Telemetry::gpuTemp,&Telemetry::ramUsed,&Telemetry::ramTotal,&Telemetry::vramUsed,&Telemetry::vramTotal};
-        float Telemetry::* writable[]={&Telemetry::cpu,&Telemetry::cpuTemp,&Telemetry::gpu,&Telemetry::gpuTemp,&Telemetry::ramUsed,&Telemetry::ramTotal,&Telemetry::vramUsed,&Telemetry::vramTotal};
-        for(unsigned i=0;i<8;i++){
+        const float Telemetry::* fields[]={&Telemetry::cpu,&Telemetry::cpuTemp,&Telemetry::gpu,&Telemetry::gpuTemp,&Telemetry::ramUsed,&Telemetry::ramTotal,&Telemetry::vramUsed,&Telemetry::vramTotal,&Telemetry::memoryHotspot,&Telemetry::memoryAverage};
+        float Telemetry::* writable[]={&Telemetry::cpu,&Telemetry::cpuTemp,&Telemetry::gpu,&Telemetry::gpuTemp,&Telemetry::ramUsed,&Telemetry::ramTotal,&Telemetry::vramUsed,&Telemetry::vramTotal,&Telemetry::memoryHotspot,&Telemetry::memoryAverage};
+        for(unsigned i=0;i<10;i++){
             if(isfinite(metrics.*fields[i])){state.metrics.*writable[i]=metrics.*fields[i];state.metricAt[i]=millis();}
-            else if(millis()-state.metricAt[i]>=10000)state.metrics.*writable[i]=NAN;
+            else if(i>=8||millis()-state.metricAt[i]>=10000)state.metrics.*writable[i]=NAN;
         }
         state.lastGood=millis();state.hasGood=true;
     }
@@ -244,9 +245,9 @@ String statusJson() {
     doc["gamepad_wake_supported"]=true;
     bool fresh=recentMetrics(s);
     JsonObject metrics=doc.createNestedObject("metrics");
-    const char* names[]={"cpu_percent","cpu_temp_c","gpu_percent","gpu_temp_c","ram_used_gib","ram_total_gib","vram_used_gib","vram_total_gib"};
-    const float values[]={s.metrics.cpu,s.metrics.cpuTemp,s.metrics.gpu,s.metrics.gpuTemp,s.metrics.ramUsed,s.metrics.ramTotal,s.metrics.vramUsed,s.metrics.vramTotal};
-    for(int i=0;i<8;i++){if(fresh&&isfinite(values[i]))metrics[names[i]]=values[i];else metrics[names[i]]=nullptr;}
+    const char* names[]={"cpu_percent","cpu_temp_c","gpu_percent","gpu_temp_c","ram_used_gib","ram_total_gib","vram_used_gib","vram_total_gib","memory_temp_c","memory_temp_avg_c"};
+    const float values[]={s.metrics.cpu,s.metrics.cpuTemp,s.metrics.gpu,s.metrics.gpuTemp,s.metrics.ramUsed,s.metrics.ramTotal,s.metrics.vramUsed,s.metrics.vramTotal,s.metrics.memoryHotspot,s.metrics.memoryAverage};
+    for(int i=0;i<10;i++){if(fresh&&isfinite(values[i]))metrics[names[i]]=values[i];else metrics[names[i]]=nullptr;}
     String result; serializeJson(doc,result); return result;
 }
 bool requestAction(const String& name) {
@@ -297,6 +298,7 @@ void networkTask(void*) {
                     };
                     m.cpu=number("cpu_percent");m.cpuTemp=number("cpu_temp_c");
                     m.gpu=number("gpu_percent");m.gpuTemp=number("gpu_temp_c");
+                    m.memoryHotspot=number("memory_temp_c");m.memoryAverage=number("memory_temp_avg_c");
                     constexpr float GiB=1073741824.0f;
                     m.ramUsed=number("ram_used_bytes",GiB);m.ramTotal=number("ram_total_bytes",GiB);
                     m.vramUsed=number("vram_used_bytes",GiB);m.vramTotal=number("vram_total_bytes",GiB);
@@ -501,7 +503,7 @@ uint16_t buttonColors[2]={0xffff,0xffff};
 String buttonLabels[2];
 String drawnScreen;
 void invalidateDisplay(){drawnScreen="";}
-String metricKeys[6],centerStatus;
+String metricKeys[7],centerStatus;
 void text(const String& value,int y,uint16_t color=TFT_WHITE,int font=2) {
     TextCache* cache=nullptr;
     for(auto& row:rows){if(row.y==y){cache=&row;break;}if(row.y<0&&!cache)cache=&row;}
@@ -563,11 +565,12 @@ void drawMonitor(const State& s){
     monitorMetric(3,214,86,"GPU TEMP",valueText(m.gpuTemp,"C",1),"TEMPERATURE",online?0xfdae:dim);
     monitorMetric(4,2,166,"RAM",valueText(m.ramUsed,"G",1),valueText(m.ramTotal," GiB total",1),online?0x6f5b:dim);
     monitorMetric(5,214,166,"VRAM",valueText(m.vramUsed,"G",1),valueText(m.vramTotal," GiB total",1),online?0x9e7f:dim);
+    monitorMetric(6,108,166,"MEM TEMP",valueText(m.memoryHotspot,m.memoryHotspot>=120?"C+":"C"),"AVG "+valueText(m.memoryAverage,"C",1),online?0xfdae:dim);
     String status=autoCutPending?"STOPPING":online?"WI-FI":recentMetrics(s)?"DELAY":"OFFLINE";
     if(status!=centerStatus){
         centerStatus=status;lcd.setTextColor(autoCutPending?TFT_YELLOW:online?TFT_GREEN:TFT_LIGHTGREY,BACKGROUND);
         lcd.setTextPadding(88);lcd.drawCentreString(status,160,28,2);lcd.setTextPadding(0);
-        lcd.setTextColor(TFT_LIGHTGREY,BACKGROUND);lcd.drawCentreString("TAP FAN",160,190,1);
+
     }
     drawMonitorAnimation();
 }

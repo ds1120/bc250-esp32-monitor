@@ -1,0 +1,21 @@
+{
+  "wireless_update_verified": true,
+  "firmware": "bc250-monitor-5.8.8",
+  "partition_before": "app1",
+  "partition_after": "app0",
+  "sha256": "0d807d66cd855c653c6f3e4849dabfaa6ab08a7dcaed351e6c40acdb5b33e458",
+  "saved_settings_preserved": true,
+  "keep_power_test": true,
+  "relay_resumed_after_restart": true,
+  "pc_boot_id_unchanged": true,
+  "physical_gpio_continuity_measured": false,
+  "base_commit": "729a9c316f70798cea32f58b1b789f18c6d3ee37",
+  "st7789_build_passed": true,
+  "python_tests_passed": 31,
+  "memory_hotspot_received_c": 44,
+  "memory_average_received_c": 42,
+  "lcd_layout": "104x64 center-bottom card at (108,166), hotspot large and average below",
+  "physical_lcd_inspected": false,
+  "missing_or_stale_snapshot_tested": true,
+  "display_sleep_delay_seconds": 10
+}

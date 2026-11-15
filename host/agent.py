@@ -125,8 +125,29 @@ def read_number(path, divisor=1):
         return None
 
 
+def read_memory_temperature(path=Path('/run/bc250-memory/telemetry'), now=None):
+    """Read an atomic collector snapshot; unavailable or stale data stays null."""
+    missing={'memory_temp_c':None, 'memory_temp_avg_c':None}
+    try:
+        lines=path.read_text().splitlines()
+        if len(lines)<5 or lines[0]!='BC250_MEMORY_V1' or lines[2]!='ok':
+            return missing
+        sampled=float(lines[1])
+        current=time.clock_gettime(time.CLOCK_BOOTTIME) if now is None else now
+        age=current-sampled
+        if not 0<=age<=10:
+            return missing
+        raw=[int(word) for word in lines[3].split()]
+        if len(raw)!=8 or any(not 0<=word<=0xffffffff or (word&255)>80 for word in raw):
+            return missing
+        temperatures=[(word&255)*2-40 for word in raw]
+        return {'memory_temp_c':max(temperatures), 'memory_temp_avg_c':round(sum(temperatures)/8,1)}
+    except (OSError,ValueError,IndexError,OverflowError):
+        return missing
+
+
 class Metrics:
-    """Read kernel counters only. Missing sensors are null, never zero."""
+    """Read kernel counters and optional memory telemetry. Missing sensors are null."""
     def __init__(self, proc=Path('/proc'), sys=Path('/sys')):
         self.proc, self.sys = proc, sys
         self.lock = threading.Lock()
@@ -196,6 +217,7 @@ class Metrics:
                         result['gpu_temp_c'] = value
                         break
                 break
+            result.update(read_memory_temperature())
             return result
 
 class Controller:
