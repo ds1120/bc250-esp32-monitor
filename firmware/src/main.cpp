@@ -22,6 +22,7 @@
 #include <hal/gpio_ll.h>
 #include "relay_restart.h"
 #include "relay_hold_guard.h"
+#include "display_sleep.h"
 #include "gamepad_wake.h"
 #include "settings_merge.h"
 
@@ -30,7 +31,7 @@ extern "C" bool btInUse(){return true;}
 
 // GPIO22 drives relay IN (H mode). Boot OFF; explicit ON holds until OFF/reset.
 // Only an authenticated, current-boot final poweroff signal schedules automatic OFF.
-constexpr const char* FIRMWARE_VERSION="bc250-monitor-5.8.6";
+constexpr const char* FIRMWARE_VERSION="bc250-monitor-5.8.7";
 TFT_eSPI lcd;
 TFT_eSprite lineSprite(&lcd);
 TFT_eSprite metricSprite(&lcd),animationSprite(&lcd);
@@ -89,6 +90,7 @@ uint32_t screenActivityAt=0;
 bool bootWasDown=false;
 bool displayAwake=true;
 bool displayManuallyOff=false;
+bool restartAfterDisplaySleep=false;
 bool suppressWakeTouch=false;
 uint32_t wakeTouchReleaseAt=0,wakeTouchGuardUntil=0;
 constexpr uint32_t AUTO_CUT_DELAY_MS=15000;
@@ -154,7 +156,7 @@ void turnRelayOff() {
     portENTER_CRITICAL(&relayLock);relay.off(millis());gpio_set_level(RELAY_PIN,0);gpio_hold_dis(RELAY_PIN);RelayRestart::clear(restartTicket);portEXIT_CRITICAL(&relayLock);
     consolePrintln("{\"event\":\"relay_off\"}");
     renewShutdownNonce();
-    confirmation="";page=0;displayAwake=false;digitalWrite(21,LOW);
+    confirmation="";page=0;screenActivityAt=millis();
 }
 bool turnRelayOn() {
     relayOnError="";
@@ -230,7 +232,8 @@ String statusJson() {
     doc["display_awake"]=displayAwake;doc["display_manually_off"]=displayManuallyOff;
     doc["esp_restart_supported"]=true;doc["esp_restart_allowed"]=!autoCutPending&&!otaActive&&!otaRebootAt;doc["sd_ready"]=sdReady;doc["sd_error"]=sdError;doc["web_source"]=sdReady&&SD.exists("/bc250/index.html")?"sd":"firmware";
     doc["metrics_poll_ms"]=metricsPollMs;doc["auto_setup_supported"]=false;doc["auto_setup_saved"]=sdReady&&learnedPcName.length()>0;doc["agent_port"]=agentPort;
-    doc["display_sleep_policy"]="relay_off";
+    doc["display_sleep_policy"]="relay_off_after_10_seconds";
+    doc["display_sleep_delay_seconds"]=DisplaySleep::DELAY_MS/1000;
     doc["display_page"]=page;doc["monitor_return_seconds"]=MONITOR_RETURN_MS/1000;
     doc["shutdown_nonce"]=currentNonce();doc["server_boot_id"]=s.bootId;
     doc["automatic_cut_pending"]=autoCutPending;
@@ -613,7 +616,7 @@ void draw() {
     text("BOOT / title: Monitor > OS > PSU",230,TFT_LIGHTGREY,1);
 }
 void wakeDisplay(){
-    displayManuallyOff=false;
+    displayManuallyOff=false;screenActivityAt=millis();
     if(!displayAwake){page=relaySnapshot().high?2:0;confirmation="";screenActivityAt=millis();displayAwake=true;suppressWakeTouch=true;wakeTouchReleaseAt=0;wakeTouchGuardUntil=millis()+350;draw();digitalWrite(21,HIGH);}
 }
 void pollAutomaticPoweroff(){
@@ -644,10 +647,10 @@ void pollAutomaticPoweroff(){
     // A fresh running reply after the final signal cancels the cut, rather than guessing.
     if(s.online&&static_cast<int32_t>(s.checked-shutdownSignalAt)>0){renewShutdownNonce();return;}
     if(millis()-shutdownSignalAt>=AUTO_CUT_DELAY_MS){
-        turnRelayOff();displayAwake=false;digitalWrite(21,LOW);
+        turnRelayOff();
         gamepadWake.suppressFor(20000);
-        consolePrintln("{\"event\":\"automatic_poweroff\",\"display_asleep\":true}");
-        if(wakeConfigNeedsRestart){config.putBool("sleep_boot",true);Serial.flush();delay(100);restartWithRelayState();}
+        consolePrintln("{\"event\":\"automatic_poweroff\",\"display_sleep_delay_seconds\":10}");
+        if(wakeConfigNeedsRestart)restartAfterDisplaySleep=true;
     }
 }
 void pollTouch() {
@@ -778,6 +781,13 @@ void setup() {
 void loop() {
     web.handleClient();pollTouch();pollAutomaticPoweroff();
     if(ready()&&relaySnapshot().high&&!displayAwake&&!displayManuallyOff)wakeDisplay();
+    if(DisplaySleep::due(relaySnapshot().high,displayAwake,millis(),screenActivityAt)){
+        confirmation="";displayAwake=false;digitalWrite(21,LOW);
+        consolePrintln("{\"event\":\"display_auto_sleep\",\"relay_off\":true}");
+    }
+    if(restartAfterDisplaySleep&&!relaySnapshot().high&&!displayAwake&&!otaActive&&!otaRebootAt){
+        restartAfterDisplaySleep=false;config.putBool("sleep_boot",true);Serial.flush();delay(100);restartWithRelayState();
+    }
     WakeConfigMessage incoming;
     if(xQueueReceive(wakeConfigs,&incoming,0)==pdTRUE&&!gamepadManual&&gamepadConfig!=incoming.json){
         DynamicJsonDocument doc(2048);

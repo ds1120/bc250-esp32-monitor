@@ -6,7 +6,13 @@
 
 기준 하드웨어는 **ESP32-2432S028 / ST7789**입니다. 보드 정보와 확인된 배선 범위는 [하드웨어 문서](docs/HARDWARE.md)를 먼저 확인하세요. 실제 릴레이 접점·ATX 배선도는 소유자가 추후 갱신할 예정이며 전체 배선이 검증됐다고 가정하면 안 됩니다.
 
-## 현재 버전: 5.8.6
+## 현재 버전: 5.8.7
+
+- 릴레이 OFF 뒤 화면을 즉시 끄는 대신 10초 후 자동으로 끕니다. 전원이 꺼진 상태에서 터치나 웹으로 화면을 깨우면 10초 동안 다시 표시합니다. 릴레이 ON 상태에는 이 자동 소등을 적용하지 않습니다. 수동 화면 끄기는 즉시 동작합니다.
+- Linux 최종 종료 신호 후 릴레이 차단까지의 기존 15초 지연은 유지합니다. 패드 식별 변경에 필요한 재시작도 화면 소등 뒤로 미룹니다.
+- ST7789 빌드, 타이머 경계/순환 테스트, Python 회귀 테스트 26개와 전원 유지 OTA를 확인했습니다. 실제 릴레이 OFF 후 LCD 소등과 GPIO 순간 파형은 이번 시험에서 측정하지 않았습니다.
+
+### 5.8.6에서 유지되는 동작
 
 - 잘못된 패드 설정이 Wi-Fi MAC을 0으로 만드는 부팅 문제를 방지합니다. Wi-Fi는 eFuse 원래 주소를 사용하며, 잘못된 설정은 내부 `pad_cfg_bad`에 보관 후 빈 패드 목록으로 복구합니다. 정상 등록 목록·수동 모드·Wi-Fi/PIN/토큰은 유지합니다.
 - SD 상태 등 알림을 우측 하단의 작은 알림으로 변경했습니다. 확인 버튼 없이 3초 후 닫힙니다. SD 없이 내장 화면에서도 적용됩니다.
@@ -40,7 +46,7 @@
 | USB 연결 상태 부팅 문제 | 미해결; 5.5도 동일 증상 보고 |
 | GPIO 순간 파형·정전·브라운아웃·EN 리셋 | 출력 연속성 미계측·미보장 |
 
-[현재 검증 기록](binaries/verification-5.8.6.json), [OTA 중단 대응](docs/OTA_RECOVERY.md), [부팅 진단](docs/BOOT_DIAGNOSIS.md)을 확인하세요. 예기치 않은 종료를 조사하며 걸었던 원격 종료 차단은 사용자 요청으로 해제됐습니다. 관리자 화면과 LCD 모두 사용하며 요청 출처·결과는 journal에 남습니다.
+[현재 검증 기록](binaries/verification-5.8.7.json), [OTA 중단 대응](docs/OTA_RECOVERY.md), [부팅 진단](docs/BOOT_DIAGNOSIS.md)을 확인하세요. 예기치 않은 종료를 조사하며 걸었던 원격 종료 차단은 사용자 요청으로 해제됐습니다. 관리자 화면과 LCD 모두 사용하며 요청 출처·결과는 journal에 남습니다.
 
 ## 최초 준비
 
@@ -60,7 +66,7 @@ python3 -m venv .venv
   read-flash 0x0 0x400000 factory.private.bin
 .venv/bin/python flash_panel.py --port /dev/ttyUSB0 \
   --factory-backup factory.private.bin \
-  --firmware binaries/bc250-monitor-5.8.6.bin --power-isolated
+  --firmware binaries/bc250-monitor-5.8.7.bin --power-isolated
 
 # 실제 Wi-Fi와 PC 주소를 입력. 개인 주소 기본값은 포함하지 않음
 .venv/bin/python configure.py --port /dev/ttyUSB0 \
@@ -81,12 +87,12 @@ SD가 없으면 내장 관리자 화면과 NVS의 핵심 설정을 사용하도�
 
 ## 이후 Wi-Fi 업데이트
 
-관리자 화면에서 `binaries/bc250-monitor-5.8.6.bin`을 선택하거나 다음 도구를 사용합니다. SD의 새 기본 화면은 별도로 ‘펌웨어 기본화면으로 복원’해야 하며 기존 동작 설정은 보존됩니다.
+관리자 화면에서 `binaries/bc250-monitor-5.8.7.bin`을 선택하거나 다음 도구를 사용합니다. SD의 새 기본 화면은 별도로 ‘펌웨어 기본화면으로 복원’해야 하며 기존 동작 설정은 보존됩니다.
 
 ```bash
 .venv/bin/python wireless_update.py --panel <현재_ESP32_IP> \
   --settings "$HOME/.config/bc250-monitor/setup.json" \
-  --firmware binaries/bc250-monitor-5.8.6.bin
+  --firmware binaries/bc250-monitor-5.8.7.bin
 ```
 
 기본은 PC가 꺼진 상태이며, 실행 중 전원 유지 시험은 작업을 저장한 뒤 `--keep-power-test`를 명시합니다. PC 업로더는 작은 TCP 세그먼트(536)와 기본 120초 제한을 사용하며 느린 링크는 `--upload-timeout 300`으로 조절합니다. 업로드가 멈췄다고 ESP32 리셋 버튼을 누르면 PC 전원이 끊길 수 있습니다. 예정된 OTA 소프트웨어 재부팅과 EN/정전/USB 업로더 리셋은 다른 조건입니다.

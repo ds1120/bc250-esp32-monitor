@@ -1,0 +1,21 @@
+{
+  "wireless_update_verified": true,
+  "firmware": "bc250-monitor-5.8.7",
+  "partition_before": "app0",
+  "partition_after": "app1",
+  "sha256": "0b891c3827a2a46505203f09eea4a3fd0aeebe8cf9bf27bc35e5cc6c61dc9d7d",
+  "saved_settings_preserved": true,
+  "keep_power_test": true,
+  "relay_resumed_after_restart": true,
+  "pc_boot_id_unchanged": true,
+  "physical_gpio_continuity_measured": false,
+  "base_commit": "cccc9b72bafe161cb0bfbc8ed54e895d9883bebe",
+  "st7789_build_passed": true,
+  "relay_restart_abi_verified": true,
+  "display_sleep_delay_seconds": 10,
+  "display_sleep_policy_verified_on_device": true,
+  "display_sleep_boundary_and_wrap_tests_passed": true,
+  "python_tests_passed": 26,
+  "actual_relay_off_lcd_sleep_tested": false,
+  "actual_gamepad_wake_tested": false
+}
